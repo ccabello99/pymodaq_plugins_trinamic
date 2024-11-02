@@ -79,14 +79,14 @@ class CustomExtensionTemplate(CustomExt):
         """Connect actions and/or other widgets signal to methods"""
         raise NotImplementedError
 
-    def setup_menu(self):
+    def setup_menu(self, menubar: QtWidgets.QMenuBar = None):
         """Non mandatory method to be subclassed in order to create a menubar
 
         create menu for actions contained into the self._actions, for instance:
 
         Examples
         --------
-        >>>file_menu = self.mainwindow.menuBar().addMenu('File')
+        >>>file_menu = menubar.addMenu('File')
         >>>self.affect_to('load', file_menu)
         >>>self.affect_to('save', file_menu)
 
