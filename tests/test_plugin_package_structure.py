@@ -8,7 +8,7 @@ import pytest
 from pathlib import Path
 import importlib
 import pkgutil
-from collections import Iterable
+from collections.abc import Iterable
 
 from pymodaq_data import Q_, Unit
 
