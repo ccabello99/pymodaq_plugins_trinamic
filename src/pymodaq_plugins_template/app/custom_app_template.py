@@ -106,7 +106,7 @@ class CustomAppTemplate(gutils.CustomApp):
 
 
 def main():
-    from pymodaq.utils.gui_utils.utils import mkQApp
+    from pymodaq_gui.utils.utils import mkQApp
     app = mkQApp('CustomApp')
 
     mainwindow = QtWidgets.QMainWindow()
