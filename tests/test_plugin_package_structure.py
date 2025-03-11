@@ -120,7 +120,10 @@ def test_compatibility(capsys):
         pytest.fail(f"Please update pymodaq_plugin_manager to a newer version: {e}")
 
     plugin = PyMoDAQPlugin(get_package_name(), None)
-    res = plugin.all_imports_valid()
+    success = plugin.all_imports_valid()
     msg = '\n'.join(plugin._failed_imports + [''])
 
-    assert res, msg
+    if not success:
+        plugin.save_import_report(".")
+
+    assert success, msg
