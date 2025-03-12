@@ -111,3 +111,19 @@ def test_viewer_has_mandatory_methods(dim):
         klass = getattr(module, f'DAQ_{dim}Viewer_{name}')
         for meth in MANDATORY_VIEWER_METHODS:
             assert hasattr(klass, meth)
+
+def test_compatibility(capsys):
+    capsys.disabled()
+    try:
+        from pymodaq_plugin_manager.compatibility_checker import PyMoDAQPlugin
+    except (ModuleNotFoundError, ImportError) as e:
+        pytest.fail(f"Please update pymodaq_plugin_manager to a newer version: {e}")
+
+    plugin = PyMoDAQPlugin(get_package_name(), None)
+    success = plugin.all_imports_valid()
+    msg = '\n'.join(plugin._failed_imports + [''])
+
+    if not success:
+        plugin.save_import_report(".")
+
+    assert success, msg
