@@ -6,7 +6,7 @@ from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_p
 from pymodaq_utils.utils import ThreadCommand  # object used to send info back to the main thread
 from pymodaq_gui.parameter import Parameter
 from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController
-from PyQt6.QtCore import QThread
+from qtpy import QtCore
 
 
 class DAQ_Move_Trinamic(DAQ_Move_base):
@@ -71,7 +71,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         # Block (kinda) until the target position is reached
         while not self.motor.get_position_reached():
             print("target position: " + str(self.motor.target_position) + " actual position: " + str(self.motor.actual_position))
-            QThread.msleep(200)
+            QtCore.QThread.msleep(200)
         
         return True
 
