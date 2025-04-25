@@ -1,0 +1,176 @@
+import time
+from typing import Union, List, Dict
+from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_parameters_fun,
+                                                          main, DataActuatorType, DataActuator)
+
+from pymodaq_utils.utils import ThreadCommand  # object used to send info back to the main thread
+from pymodaq_gui.parameter import Parameter
+from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController
+from PyQt6.QtCore import QThread
+
+
+class DAQ_Move_Trinamic(DAQ_Move_base):
+    """
+        * This has been tested with the TMCM-1311 Trinamic stepper motor controller
+        * Tested on PyMoDAQ 5.0.6
+        * Tested on Python 3.11
+        * No additional drivers necessary
+    """
+    is_multiaxes = False
+    _axis_names: Union[List[str], Dict[str, int]] = ['Axis1']
+    _controller_units: Union[str, List[str]] = 'um'
+    _epsilon: Union[float, List[float]] = 0.1
+    data_actuator_type = DataActuatorType.DataActuator  # wether you use the new data style for actuator otherwise set this
+    # as  DataActuatorType.float  (or entirely remove the line)
+
+    manager = TrinamicManager()
+    devices = manager.probe_tmcl_ports()
+
+    params = [
+                {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
+                    {'title': 'Connected Devices', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
+                    {'title': 'Valid Devices', 'name': 'valid_devices', 'type': 'list', 'limits': manager.connections},
+                    {'title': 'Selected Device', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
+                    {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'int', 'value': 9600, 'readonly': True},
+
+                ]},
+                {'title': 'Closed loop?:', 'name': 'closed_loop', 'type': 'led_push', 'value': False, 'default': False},
+                {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
+                    {'title': 'Stop Motion:', 'name': 'stop_motion', 'type': 'bool_push', 'value': False},
+                    {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
+                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}
+                ]},
+                {'title': 'Motion Control:', 'name': 'velocity', 'type': 'group', 'children': [
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 20000},
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 40000},
+                ]},
+        ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
+
+    def ini_attributes(self):
+        self.controller: TrinamicController = None
+
+    def get_actuator_value(self):
+        """Get the current value from the hardware with scaling conversion.
+
+        Returns
+        -------
+        float: The position obtained after scaling conversion.
+        """
+        pos = DataActuator(data=self.controller.actual_position)
+        pos = self.get_position_with_scaling(pos)
+        return pos
+
+    def user_condition_to_reach_target(self) -> bool:
+        """ Implement a condition for exiting the polling mechanism and specifying that the
+        target value has been reached
+
+       Returns
+        -------
+        bool: if True, PyMoDAQ considers the target value has been reached
+        """
+        # Block (kinda) until the target position is reached
+        while not self.motor.get_position_reached():
+            print("target position: " + str(self.motor.target_position) + " actual position: " + str(self.motor.actual_position))
+            QThread.msleep(200)
+        
+        return True
+
+    def close(self):
+        """Terminate the communication protocol"""
+        self.devices.close(self.controller.port)
+        self.settings.child('device_manager', 'valid_devices').setLimits(self.manager.connections)
+        self.controller.close()
+
+    def commit_settings(self, param: Parameter):
+        """Apply the consequences of a change of value in the detector settings
+
+        Parameters
+        ----------
+        param: Parameter
+            A given parameter (within detector_settings) whose value has been changed by the user
+        """
+        ## TODO for your custom plugin
+        if param.name() == 'closed_loop':
+            self.controller.set_closed_loop_mode(param.value())
+        elif param.name() == 'max_velocity':
+            self.controller.max_velocity = param.value()
+        elif param.name() == 'max_acceleration':
+            self.controller.max_acceleration = param.value()
+        elif param.name() == 'microstep_resolution':
+            self.controller.microstep_resolution = param.value()
+        elif param.name() == 'stop_motion':
+            if param.value():
+                self.controller.stop()
+                self.settings.child('positioning', 'stop_motion').setValue(False)
+        elif param.name() == 'set_reference_position':
+            if param.value():
+                self.controller.set_reference_position()
+                self.settings.child('positioning', 'set_reference_position').setValue(False)
+        
+
+    def ini_stage(self, controller=None):
+        """Actuator communication initialization
+
+        Parameters
+        ----------
+        controller: (object)
+            custom object of a PyMoDAQ plugin (Slave case). None if only one actuator by controller (Master case)
+
+        Returns
+        -------
+        info: str
+        initialized: bool
+            False if initialization failed otherwise True
+        """
+        self.ini_stage_init(old_controller=controller, 
+                            new_controller=TrinamicController(self.settings.child('device_manager', 'connected_devices').value()))
+        
+        self.manager.connect(self.controller.port)
+
+        info = "Actuator on port {} initialized".format(self.controller.port)
+        initialized = True
+        return info, initialized
+
+    def move_abs(self, value: DataActuator):
+        """ Move the actuator to the absolute target defined by value
+
+        Parameters
+        ----------
+        value: (float) value of the absolute target positioning
+        """
+
+        #value = self.check_bound(value)  #if user checked bounds, the defined bounds are applied here
+        self.target_value = value
+        #value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
+        self.controller.set_absolute_motion()
+        self.controller.move_to(value.value())
+        
+        self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(value.value())]))
+
+    def move_rel(self, value: DataActuator):
+        """ Move the actuator to the relative target actuator value defined by value
+
+        Parameters
+        ----------
+        value: (float) value of the relative target positioning
+        """
+        #value = self.check_bound(self.current_position + value) - self.current_position
+        self.target_value = value + self.current_position
+        #value = self.set_position_relative_with_scaling(value)
+        self.controller.set_relative_motion()
+        self.controller.move_by(value.value())
+        self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(value.value())]))
+
+    def move_home(self):
+        """Call the reference method of the controller"""
+        self.controller.move_to_reference()
+        self.emit_status(ThreadCommand('Update_Status', ['Moving to zero position']))
+
+    def stop_motion(self):
+      """Stop the actuator and emits move_done signal"""
+      self.controller.stop()  # when writing your own plugin replace this line
+      self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
+
+
+if __name__ == '__main__':
+    main(__file__)
