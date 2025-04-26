@@ -1,5 +1,5 @@
 import time
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Tuple
 from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_parameters_fun,
                                                           main, DataActuatorType, DataActuator)
 
@@ -19,19 +19,17 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         * No additional drivers necessary
     """
     is_multiaxes = False
-    _axis_names: Union[List[str], Dict[str, int]] = ['Axis1']
-    _controller_units: Union[str, List[str]] = 'um' # this is bullshit right now, but keep it for now
-    _epsilon: Union[float, List[float]] = 1
-    data_actuator_type = DataActuatorType.DataActuator  # wether you use the new data style for actuator otherwise set this
-    # as  DataActuatorType.float  (or entirely remove the line)
+    _axis_names: Union[List[str], Dict[str, int]] = ['Axis 1']
+    _controller_units: Union[str, List[str]] = 'um' # this is bullshit for our controller, but keep it for now
+    data_actuator_type = DataActuatorType.DataActuator
 
     manager = TrinamicManager()
     devices = manager.probe_tmcl_ports()
 
     params = [
                 {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
-                    {'title': 'Connected Devices', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
-                    {'title': 'Selected Device', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
+                    {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
+                    {'title': 'Selected Device:', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
                     {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'int', 'value': 9600, 'readonly': True},
 
                 ]},
@@ -41,10 +39,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                     {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
-                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 20000},
-                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 40000},
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 20000, 'limits': [1, 250000]},
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 40000, 'limits': [1, 30000000]},
                 ]},
-        ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
+        ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names)
 
     def ini_attributes(self):
         self.controller: TrinamicController = None
@@ -70,7 +68,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         -------
         bool: if True, PyMoDAQ considers the target value has been reached
         """
-        # Block (kinda) until the target position is reached
+        # Block (kinda) until the target position is reached for same reason as above
         QtCore.QThread.msleep(200)
         if self.controller.motor.get_position_reached():
             return True
@@ -92,7 +90,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         param: Parameter
             A given parameter (within detector_settings) whose value has been changed by the user
         """
-        ## TODO for your custom plugin
         if param.name() == 'closed_loop':
             self.controller.set_closed_loop_mode(param.value())
         elif param.name() == 'max_velocity':
@@ -104,7 +101,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif param.name() == 'set_reference_position':
             if param.value():
                 self.controller.set_reference_position()
-                self.settings.child('positioning', 'set_reference_position').setValue(False)
+                self.settings.child('positioning', 'set_reference_position').setValue(False)     
         
 
     def ini_stage(self, controller=None):
@@ -126,26 +123,25 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         if self.is_master:  # is needed when controller is master
             self.controller = TrinamicController(self.settings.child('device_manager', 'connected_devices').value())
         
-        # Establishing connection
+        # Establish connection
         self.manager.connect(self.controller.port)
         self.controller.connect_module(TMCM1311, self.manager.interfaces[self.manager.connections.index(self.controller.port)])
         self.controller.connect_motor()
         self.settings.child('device_manager', 'selected_device').setValue(self.controller.port)
 
-        # Preparing drive settings
+        # Preparing drive settings (these are safe options, but we can let user define this if we want)
         self.controller.max_current = 32
         self.controller.standby_current = 8
         self.controller.boost_current = 0
+
+        # Microstep resolution
         self.controller.microstep_resolution = self.settings.child('positioning', 'microstep_resolution').value()
 
         # Preparing linear ramp settings
         self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
         self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
 
-        # Allow time for controller to initialize
-        time.sleep(1.0)
-
-        # set move_by relative to the actual position
+        # Set move_by relative to the actual position
         self.controller.motor.set_axis_parameter(self.controller.motor.AP.RelativePositioningOption, 1)
 
         info = "Actuator on port {} initialized".format(self.controller.port)
@@ -161,9 +157,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         value: (float) value of the absolute target positioning
         """
 
-        #value = self.check_bound(value)  #if user checked bounds, the defined bounds are applied here
+        value = self.check_bound(value)  #if user checked bounds, the defined bounds are applied here
         self.target_value = value
-        #value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
+        value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
         self.controller.set_absolute_motion()
         self.controller.move_to(int(round(value.value())))
         
@@ -176,9 +172,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         ----------
         value: (float) value of the relative target positioning
         """
-        #value = self.check_bound(self.current_position + value) - self.current_position
+        value = self.check_bound(self.current_position + value) - self.current_position
         self.target_value = value + self.current_position
-        #value = self.set_position_relative_with_scaling(value)
+        value = self.set_position_relative_with_scaling(value)
         self.controller.set_relative_motion()
         self.controller.move_by(int(round(value.value())))
         self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(value.value())]))
@@ -190,7 +186,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
     def stop_motion(self):
       """Stop the actuator and emits move_done signal"""
-      self.controller.stop()  # when writing your own plugin replace this line
+      self.controller.stop()
       self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
 
 
