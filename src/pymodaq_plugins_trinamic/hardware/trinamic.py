@@ -16,12 +16,11 @@ class TrinamicManager:
 
         for port in ports:
             try:
-                # Try opening a connection and sending a TMCL "GetVersion"
                 conn = UsbTmclInterface(port.device, datarate=9600)
                 self.ports.append(port.device)
                 conn.close()
             except Exception as e:
-                print(f"✖ No TMCL devices found: ({e})")
+                print(f"No TMCL devices found: ({e})")
         return self.ports
 
     def connect(self, port):
