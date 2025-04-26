@@ -1,6 +1,5 @@
 import platform
 from pytrinamic.connections import SerialTmclInterface, UsbTmclInterface, ConnectionManager
-from pytrinamic.modules import TMCM1311
 from serial.tools import list_ports
 import time
 
@@ -9,6 +8,7 @@ class TrinamicManager:
     def __init__(self):
         self.ports = None
         self.connections = []
+        self.interfaces = []
 
     def probe_tmcl_ports(self):
         self.ports = []
@@ -26,16 +26,18 @@ class TrinamicManager:
 
     def connect(self, port):
         try:
-            self.interface = UsbTmclInterface(port, datarate=9600)
+            conn = UsbTmclInterface(port, datarate=9600)
+            self.interfaces.append(conn)
             self.connections.append(port)
-            print(f"Connected to TMCL device at {port}")
         except Exception as e:
             print(f"Failed to connect to TMCL device at {port}: {e}")
 
     def close(self, port):
         try:
             if port in self.connections:
+                index = self.connections.index(port)
                 self.connections.remove(port)
+                self.interfaces[index].close()
             else:
                 print(f"No connection found for {port}")
         except Exception as e:
@@ -45,39 +47,21 @@ class TrinamicManager:
 class TrinamicController:
     def __init__(self, port):
         self.port = port
-        self.interface = None
         self.module = None
         self.motor = None
-        self.possible_microstep_resolution = ["MicrostepResolutionFullstep",
-                                                "MicrostepResolutionHalfstep",
-                                                "MicrostepResolution4Microsteps",
-                                                "MicrostepResolution8Microsteps",
-                                                "MicrostepResolution16Microsteps",
-                                                "MicrostepResolution32Microsteps",
-                                                "MicrostepResolution64Microsteps",
-                                                "MicrostepResolution128Microsteps",
-                                                "MicrostepResolution256Microsteps"]
         self.reference_position = 0
 
-    def get_version(self):
-        if self.connection:
-            try:
-                version = self.interface.get_version_string()
-                return version
-            except Exception as e:
-                print(f"Failed to get version: {e}")
-        else:
-            print("No connection established.")
-
-    def connect_module(self, module_type) -> None:
-        self.module = module_type(self.interface)
+    def connect_module(self, module_type, interface) -> None:
+        try:
+            self.module = module_type(interface)
+        except Exception as e:
+            print(f"Failed to connect to module: {e}")
 
     def connect_motor(self) -> None:
-        self.motor = self.module.motors[0]
-
-    def close(self):
-        if self.interface:
-            self.interface.close()
+        try:
+            self.motor = self.module.motors[0]
+        except Exception as e:
+            print(f"Failed to connect to motor: {e}")
 
     @property 
     def max_current(self):
@@ -110,23 +94,23 @@ class TrinamicController:
     @microstep_resolution.setter
     def microstep_resolution(self, value):
         if value == "Full":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[0]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolutionFullstep
         elif value == "Half":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[1]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolutionHalfstep
         elif value == "4":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[2]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution4Microsteps
         elif value == "8":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[3]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution8Microsteps
         elif value == "16":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[4]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution16Microsteps
         elif value == "32":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[5]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution32Microsteps
         elif value == "64":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[6]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution64Microsteps
         elif value == "128":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[7]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution128Microsteps
         elif value == "256":
-            self.motor.drive_settings.microstep_resolution = self.possible_microstep_resolution[8]
+            self.motor.drive_settings.microstep_resolution = self.motor.ENUM.MicrostepResolution256Microsteps
 
     @property
     def max_velocity(self):
@@ -181,21 +165,7 @@ class TrinamicController:
         self.motor.move_by(difference, self.motor.linear_ramp.max_velocity)
 
     def move_to_reference(self) -> None:
-        self.move_to(0, self.motor.linear_ramp.max_velocity)
+        self.motor.move_to(0, self.motor.linear_ramp.max_velocity)
     
     def stop(self) -> None:
         self.motor.stop()
-    
-    
-
-    
-
-
-        
-    
-
-    
-
-
-
-#device_ports = probe_tmcl_ports()

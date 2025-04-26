@@ -8,6 +8,8 @@ from pymodaq_gui.parameter import Parameter
 from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController
 from qtpy import QtCore
 
+from pytrinamic.modules import TMCM1311
+
 
 class DAQ_Move_Trinamic(DAQ_Move_base):
     """
@@ -18,8 +20,8 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     """
     is_multiaxes = False
     _axis_names: Union[List[str], Dict[str, int]] = ['Axis1']
-    _controller_units: Union[str, List[str]] = 'um'
-    _epsilon: Union[float, List[float]] = 0.1
+    _controller_units: Union[str, List[str]] = 'um' # this is bullshit right now, but keep it for now
+    _epsilon: Union[float, List[float]] = 1
     data_actuator_type = DataActuatorType.DataActuator  # wether you use the new data style for actuator otherwise set this
     # as  DataActuatorType.float  (or entirely remove the line)
 
@@ -29,18 +31,16 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     params = [
                 {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
                     {'title': 'Connected Devices', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
-                    {'title': 'Valid Devices', 'name': 'valid_devices', 'type': 'list', 'limits': manager.connections},
                     {'title': 'Selected Device', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
                     {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'int', 'value': 9600, 'readonly': True},
 
                 ]},
                 {'title': 'Closed loop?:', 'name': 'closed_loop', 'type': 'led_push', 'value': False, 'default': False},
                 {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
-                    {'title': 'Stop Motion:', 'name': 'stop_motion', 'type': 'bool_push', 'value': False},
                     {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
-                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}
+                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}
                 ]},
-                {'title': 'Motion Control:', 'name': 'velocity', 'type': 'group', 'children': [
+                {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
                     {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 20000},
                     {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 40000},
                 ]},
@@ -56,8 +56,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         -------
         float: The position obtained after scaling conversion.
         """
+        # Block (kinda) to avoid reading the position too fast (bad for controller)
+        QtCore.QThread.msleep(200)
         pos = DataActuator(data=self.controller.actual_position)
-        pos = self.get_position_with_scaling(pos)
+        #pos = self.get_position_with_scaling(pos)
         return pos
 
     def user_condition_to_reach_target(self) -> bool:
@@ -69,17 +71,18 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         bool: if True, PyMoDAQ considers the target value has been reached
         """
         # Block (kinda) until the target position is reached
-        while not self.motor.get_position_reached():
-            print("target position: " + str(self.motor.target_position) + " actual position: " + str(self.motor.actual_position))
-            QtCore.QThread.msleep(200)
-        
-        return True
+        QtCore.QThread.msleep(200)
+        if self.controller.motor.get_position_reached():
+            return True
+        else:
+            return False        
 
     def close(self):
         """Terminate the communication protocol"""
-        self.devices.close(self.controller.port)
-        self.settings.child('device_manager', 'valid_devices').setLimits(self.manager.connections)
-        self.controller.close()
+        port = self.controller.port
+        self.manager.close(self.controller.port)
+        print("Closed connection to device on port {}".format(port))
+        self.controller = None
 
     def commit_settings(self, param: Parameter):
         """Apply the consequences of a change of value in the detector settings
@@ -98,10 +101,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             self.controller.max_acceleration = param.value()
         elif param.name() == 'microstep_resolution':
             self.controller.microstep_resolution = param.value()
-        elif param.name() == 'stop_motion':
-            if param.value():
-                self.controller.stop()
-                self.settings.child('positioning', 'stop_motion').setValue(False)
         elif param.name() == 'set_reference_position':
             if param.value():
                 self.controller.set_reference_position()
@@ -122,13 +121,36 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         initialized: bool
             False if initialization failed otherwise True
         """
-        self.ini_stage_init(old_controller=controller, 
-                            new_controller=TrinamicController(self.settings.child('device_manager', 'connected_devices').value()))
+        self.ini_stage_init(slave_controller=controller)  # will be useful when controller is slave
+
+        if self.is_master:  # is needed when controller is master
+            self.controller = TrinamicController(self.settings.child('device_manager', 'connected_devices').value())
         
+        # Establishing connection
         self.manager.connect(self.controller.port)
+        self.controller.connect_module(TMCM1311, self.manager.interfaces[self.manager.connections.index(self.controller.port)])
+        self.controller.connect_motor()
+        self.settings.child('device_manager', 'selected_device').setValue(self.controller.port)
+
+        # Preparing drive settings
+        self.controller.max_current = 32
+        self.controller.standby_current = 8
+        self.controller.boost_current = 0
+        self.controller.microstep_resolution = self.settings.child('positioning', 'microstep_resolution').value()
+
+        # Preparing linear ramp settings
+        self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
+        self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
+
+        # Allow time for controller to initialize
+        time.sleep(1.0)
+
+        # set move_by relative to the actual position
+        self.controller.motor.set_axis_parameter(self.controller.motor.AP.RelativePositioningOption, 1)
 
         info = "Actuator on port {} initialized".format(self.controller.port)
         initialized = True
+        print(info)
         return info, initialized
 
     def move_abs(self, value: DataActuator):
@@ -143,7 +165,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.target_value = value
         #value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
         self.controller.set_absolute_motion()
-        self.controller.move_to(value.value())
+        self.controller.move_to(int(round(value.value())))
         
         self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(value.value())]))
 
@@ -158,7 +180,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.target_value = value + self.current_position
         #value = self.set_position_relative_with_scaling(value)
         self.controller.set_relative_motion()
-        self.controller.move_by(value.value())
+        self.controller.move_by(int(round(value.value())))
         self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(value.value())]))
 
     def move_home(self):
