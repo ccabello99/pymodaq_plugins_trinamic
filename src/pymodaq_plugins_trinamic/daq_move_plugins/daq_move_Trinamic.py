@@ -42,6 +42,11 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                     {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 20000, 'limits': [1, 250000]},
                     {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 40000, 'limits': [1, 30000000]},
                 ]},
+                {'title': 'Drive Setting:', 'name': 'current', 'type': 'group', 'children': [
+                    {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 32, 'limits': [0, 240]}, 
+                    {'title': 'Standby Current:', 'name': 'standby_current', 'type': 'int', 'value': 8, 'limits': [0, 240]},
+                    {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 10]},
+                ]},
         ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names)
 
     def ini_attributes(self):
@@ -101,7 +106,11 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif param.name() == 'set_reference_position':
             if param.value():
                 self.controller.set_reference_position()
-                self.settings.child('positioning', 'set_reference_position').setValue(False)     
+                self.settings.child('positioning', 'set_reference_position').setValue(False)
+        elif param.name() =='max_current':
+            self.controller.max_current = param.value()
+        elif param.name() =='standby_current':
+            self.controller.standby_current = param.value()
         
 
     def ini_stage(self, controller=None):
@@ -129,10 +138,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.connect_motor()
         self.settings.child('device_manager', 'selected_device').setValue(self.controller.port)
 
-        # Preparing drive settings (these are safe options, but we can let user define this if we want)
-        self.controller.max_current = 32
-        self.controller.standby_current = 8
-        self.controller.boost_current = 0
+        # Preparing drive settings
+        self.controller.max_current = self.settings.child('current', 'max_current').value()
+        self.controller.standby_current = self.settings.child('current', 'standby_current').value()
+        self.controller.boost_current = self.settings.child('current', 'boost_current').value()
 
         # Microstep resolution
         self.controller.microstep_resolution = self.settings.child('positioning', 'microstep_resolution').value()
