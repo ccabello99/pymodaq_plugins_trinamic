@@ -157,7 +157,9 @@ class TrinamicController:
         self.motor.set_axis_parameter(self.motor.AP.RelativePositioningOption, 0)
     
     def set_reference_position(self) -> None:
-        self.motor.actual_position = 0
+        self.stop()
+        self.motor.set_axis_parameter(self.motor.AP.ActualPosition, 0)
+        self.stop()
     
     def move_to(self, position) -> None:
         self.motor.move_to(position, self.motor.linear_ramp.max_velocity)
