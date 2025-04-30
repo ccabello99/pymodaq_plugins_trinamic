@@ -35,8 +35,10 @@ class TrinamicManager:
         try:
             if port in self.connections:
                 index = self.connections.index(port)
-                self.connections.remove(port)
                 self.interfaces[index].close()
+                # Clean up both lists
+                del self.interfaces[index]
+                del self.connections[index]
             else:
                 print(f"No connection found for {port}")
         except Exception as e:

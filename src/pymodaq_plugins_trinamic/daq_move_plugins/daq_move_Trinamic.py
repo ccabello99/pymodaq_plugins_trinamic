@@ -62,7 +62,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         # Block (kinda) to avoid reading the position too fast (bad for controller)
         QtCore.QThread.msleep(200)
         pos = DataActuator(data=self.controller.actual_position)
-        #pos = self.get_position_with_scaling(pos)
+        pos = self.get_position_with_scaling(pos)
         return pos
 
     def user_condition_to_reach_target(self) -> bool:
@@ -83,7 +83,8 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     def close(self):
         """Terminate the communication protocol"""
         port = self.controller.port
-        self.manager.close(self.controller.port)
+        self.controller.port = ''
+        self.manager.close(port)
         print("Closed connection to device on port {}".format(port))
         self.controller = None
 
@@ -107,6 +108,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             if param.value():
                 self.controller.set_reference_position()
                 self.settings.child('positioning', 'set_reference_position').setValue(False)
+                self.move_home() # make sure we are indeed at the home position
         elif param.name() =='max_current':
             self.controller.max_current = param.value()
         elif param.name() =='standby_current':
@@ -192,6 +194,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         """Call the reference method of the controller"""
         self.controller.move_to_reference()
         self.emit_status(ThreadCommand('Update_Status', ['Moving to zero position']))
+        self.poll_moving()
 
     def stop_motion(self):
       """Stop the actuator and emits move_done signal"""
