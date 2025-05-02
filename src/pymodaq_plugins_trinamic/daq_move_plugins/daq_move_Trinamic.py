@@ -128,6 +128,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         initialized: bool
             False if initialization failed otherwise True
         """
+        # Always get a fresh list on device initialization
+        devices = self.manager.probe_tmcl_ports()
+        self.settings.child('device_manager', 'connected_devices').setLimits(devices)
+
         self.ini_stage_init(slave_controller=controller)  # will be useful when controller is slave
 
         if self.is_master:  # is needed when controller is master
