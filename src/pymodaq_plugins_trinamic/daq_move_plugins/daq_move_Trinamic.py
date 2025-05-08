@@ -21,7 +21,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     """
     is_multiaxes = False
     _axis_names: Union[List[str], Dict[str, int]] = ['Axis 1']
-    _controller_units: Union[str, List[str]] = 'um' # this is bullshit for our controller, but keep it for now
+    _controller_units: Union[str, List[str]] = 'um' # this actually corresponds to microsteps for our controllers
     data_actuator_type = DataActuatorType.DataActuator
 
     manager = TrinamicManager()
@@ -41,7 +41,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
                     {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 200000, 'limits': [1, 250000]},
                     {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 22000000, 'limits': [1, 30000000]},
-                    {'title': 'Stage Type:', 'name': 'stage_type', 'type': 'list', 'value': 'Linear', 'limits': ['Linear', 'Rotary']},
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
                     {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 150, 'limits': [0, 240]}, 
