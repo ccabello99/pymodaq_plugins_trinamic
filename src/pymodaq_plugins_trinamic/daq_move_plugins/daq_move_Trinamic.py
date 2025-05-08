@@ -7,6 +7,7 @@ from pymodaq_utils.utils import ThreadCommand  # object used to send info back t
 from pymodaq_gui.parameter import Parameter
 from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController
 from qtpy import QtCore
+from pymodaq_utils.serialize.serializer_legacy import DeSerializer
 
 from pytrinamic.modules import TMCM1311
 
@@ -39,7 +40,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
                     {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 200000, 'limits': [1, 250000]},
-                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 12000000, 'limits': [1, 30000000]},
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 22000000, 'limits': [1, 30000000]},
                     {'title': 'Stage Type:', 'name': 'stage_type', 'type': 'list', 'value': 'Linear', 'limits': ['Linear', 'Rotary']},
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
@@ -199,6 +200,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     def stop_motion(self):
       """Stop the actuator and emits move_done signal"""
       self.controller.stop()
+      self.move_done()
       self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
 
 

@@ -20,7 +20,7 @@ class TrinamicManager:
                 self.ports.append(port.device)
                 conn.close()
             except Exception as e:
-                print(f"No TMCL devices found: ({e})")
+                pass
         return self.ports
 
     def connect(self, port):
@@ -40,9 +40,9 @@ class TrinamicManager:
                 del self.interfaces[index]
                 del self.connections[index]
             else:
-                print(f"No connection found for {port}")
+                pass
         except Exception as e:
-            print(f"Failed to close connection: {e}")
+            pass
         
 
 class TrinamicController:
