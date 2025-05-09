@@ -92,7 +92,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         except TimeoutError:
             print("Timeout setting remote name.")  # TODO change to real logging
 
-        # for some reason factor of 1e-3 btwn position values in this module and original module; correct for it here
+        # for some reason factor of 1e-3 btwn position values for good responsiveness in this module and original module
         self.settings.child('scaling', 'use_scaling').setValue(True)
         self.settings.child('scaling', 'scaling').setValue(1e-3)
         self.settings.child('scaling').hide()
