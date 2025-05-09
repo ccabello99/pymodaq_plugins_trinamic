@@ -155,6 +155,15 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
         self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
 
+        # Good initial scaling (1 degree for rotation and 1 mm for linear per ustep (um))
+        self.settings.child('scaling', 'use_scaling').setValue(True)
+        self.settings.child('scaling', 'scaling').setValue(1.11111e-5)
+
+        # Hide some useless settings
+        self.settings.child('multiaxes').hide()
+        self.settings.child('epsilon').hide()
+        self.settings.child('units').hide()
+
         info = "Actuator on port {} initialized".format(self.controller.port)
         initialized = True
         print(info)
