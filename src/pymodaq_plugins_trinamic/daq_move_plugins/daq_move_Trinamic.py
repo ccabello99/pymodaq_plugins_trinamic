@@ -21,7 +21,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     """
     is_multiaxes = False
     _axis_names: Union[List[str], Dict[str, int]] = ['Axis 1']
-    _controller_units: Union[str, List[str]] = 'um' # this actually corresponds to microsteps for our controllers
+    _controller_units: Union[str, List[str]] = 'dimensionless' # this actually corresponds to microsteps for our controllers
     data_actuator_type = DataActuatorType.DataActuator
 
     manager = TrinamicManager()
@@ -181,7 +181,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.set_absolute_motion()
         self.controller.move_to(int(round(value.value())))
         
-        self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(value.value())]))
+        self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(self.get_position_with_scaling(value).value())]))
 
     def move_rel(self, value: DataActuator):
         """ Move the actuator to the relative target actuator value defined by value
@@ -195,7 +195,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         value = self.set_position_relative_with_scaling(value)
         self.controller.set_relative_motion()
         self.controller.move_by(int(round(value.value())))
-        self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(value.value())]))
+        self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(self.get_position_with_scaling(value).value())]))
 
     def move_home(self):
         """Call the reference method of the controller"""
