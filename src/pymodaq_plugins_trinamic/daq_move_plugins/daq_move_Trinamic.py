@@ -161,8 +161,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
         # Hide some useless settings
         self.settings.child('multiaxes').hide()
-        self.settings.child('epsilon').hide()
-        self.settings.child('units').hide()
 
         info = "Actuator on port {} initialized".format(self.controller.port)
         initialized = True
