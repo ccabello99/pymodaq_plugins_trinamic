@@ -1,11 +1,14 @@
 import time
+import json
+import os
+import platform
 from typing import Union, List, Dict, Tuple
 from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_parameters_fun,
                                                           main, DataActuatorType, DataActuator)
 
 from pymodaq_utils.utils import ThreadCommand  # object used to send info back to the main thread
 from pymodaq_gui.parameter import Parameter
-from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController
+from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController, PositionMonitor
 from qtpy import QtCore
 from pymodaq_utils.serialize.serializer_legacy import DeSerializer
 
@@ -34,18 +37,27 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                     {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'int', 'value': 9600, 'readonly': True},
                 ]},
                 {'title': 'Closed loop?:', 'name': 'closed_loop', 'type': 'led_push', 'value': False, 'default': False},
+                {'title': 'Encoder Settings:', 'name': 'encoder', 'type': 'group', 'children': [
+                    {'title': 'Detect Encoder Resolution ?', 'name': 'detect_encoder', 'type': 'bool_push', 'value': False},
+                    {'title': 'Encoder Resolution:', 'name': 'encoder_resolution', 'type': 'int', 'value': 1000, 'limits': [1, 1000000]},
+                    {'title': 'Encoder Position:', 'name': 'encoder_position', 'type': 'int', 'value': 0, 'readonly': True},
+                ]},
                 {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
                     {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
                     {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
-                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 200000, 'limits': [1, 250000]},
-                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 22000000, 'limits': [1, 30000000]},
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]},
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 15000000, 'limits': [1, 30000000]},
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
-                    {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 150, 'limits': [0, 240]}, 
+                    {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 75, 'limits': [0, 240]},
                     {'title': 'Standby Current:', 'name': 'standby_current', 'type': 'int', 'value': 8, 'limits': [0, 240]},
-                    {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 10]},
+                    {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 240]},
+                ]},
+                {'title': 'Favorite Position Settings:', 'name': 'fav_pos_settings', 'type': 'group', 'children': [
+                    {'title': 'Favorite Position Dictionary Location:', 'name': 'fav_pos_location', 'type': 'browsepath', 'value': ''},
+                    {'title': 'Load Favorite Positions ?:', 'name': 'load_fav_pos', 'type': 'bool_push', 'value': False},
                 ]},
         ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names)
 
@@ -85,6 +97,13 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         port = self.controller.port
         self.controller.port = ''
         self.manager.close(port)
+
+        # Stop any background threads
+        if hasattr(self, 'pos_worker'):
+            self.pos_worker.stop()
+        if hasattr(self, 'pos_thread'):
+            self.pos_thread.quit()
+            self.pos_thread.wait()
         print("Closed connection to device on port {}".format(port))
         self.controller = None
 
@@ -96,23 +115,75 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         param: Parameter
             A given parameter (within detector_settings) whose value has been changed by the user
         """
-        if param.name() == 'closed_loop':
-            self.controller.set_closed_loop_mode(param.value())
-        elif param.name() == 'max_velocity':
-            self.controller.max_velocity = param.value()
-        elif param.name() == 'max_acceleration':
-            self.controller.max_acceleration = param.value()
-        elif param.name() == 'microstep_resolution':
-            self.controller.microstep_resolution = param.value()
-        elif param.name() == 'set_reference_position':
-            if param.value():
+        name = param.name()
+        value = param.value()
+        if name == 'closed_loop':
+            self.controller.set_closed_loop_mode(value)
+        elif name == 'max_velocity':
+            self.controller.max_velocity = value
+        elif name == 'max_acceleration':
+            self.controller.max_acceleration = value
+        elif name == 'microstep_resolution':
+            self.controller.microstep_resolution = value
+        elif name == 'set_reference_position':
+            if value:
                 self.controller.set_reference_position()
                 self.settings.child('positioning', 'set_reference_position').setValue(False)
                 self.poll_moving()
-        elif param.name() =='max_current':
-            self.controller.max_current = param.value()
-        elif param.name() =='standby_current':
-            self.controller.standby_current = param.value()
+        elif name =='max_current':
+            self.controller.max_current = value
+        elif name =='standby_current':
+            self.controller.standby_current = value
+        elif name == 'boost_current':
+            self.controller.boost_current = value
+        elif name == 'detect_encoder':
+            # detect encoder resolution
+            if value:
+                print("Detecting encoder resolution")
+                self.emit_status(ThreadCommand('Update_Status', ["Detecting encoder resolution"]))
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderInitialization, 1)
+                timeout = 0
+                while self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderInitialization) != 2 and timeout < 10:
+                    QtCore.QThread.msleep(100)
+                    timeout += 0.1
+                    if timeout >= 5:
+                        print("Timeout while detecting encoder resolution")
+                        self.emit_status(ThreadCommand('Update_Status', ["Timeout while detecting encoder resolution"]))
+                        param = self.settings.child('encoder', 'detect_encoder')
+                        param.setValue(False)
+                        param.sigValueChanged.emit(param, False)
+                        return
+                print("Encoder resolution = {}".format(self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderResolution)))
+                self.settings.child('encoder', 'encoder_resolution').setValue(self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderResolution))
+                param = self.settings.child('encoder', 'detect_encoder')
+                param.setValue(False)
+                param.sigValueChanged.emit(param, False)
+                self.emit_status(ThreadCommand('Update_Status', ["Encoder resolution = {}".format(self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderResolution))]))
+        elif name == 'encoder_resolution':
+            if value > 0:
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderResolution, value)
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderPosition, 0)
+                self.settings.child('encoder', 'encoder_position').setValue(0)
+        elif name == 'load_fav_pos':
+            if value:
+                filepath = self.settings.child('fav_pos_settings', 'fav_pos_location').value()
+                with open(filepath, 'r') as file:
+                    attributes = json.load(file)
+                    self.controller.favorite_positions = self.clean_fav_pos_dict(attributes)
+                    self.add_params_to_settings(self.controller.favorite_positions)
+                param = self.settings.child('fav_pos_settings', 'load_fav_pos')
+                param.setValue(False)
+                param.sigValueChanged.emit(param, False)        
+        if 'go_to_' in name:
+            if value:
+                target_name = name.replace("go_to_", "")
+                target_value = self.settings.child('favorite_positions', target_name).value()
+                self.move_abs(DataActuator(data=target_value))
+                self.emit_status(ThreadCommand('Update_Status', ['Moving to favorite position: {}'.format(target_name)]))
+                param = self.settings.child('favorite_positions', name)
+                param.setValue(False)
+                param.sigValueChanged.emit(param, False)
+        
 
     def ini_stage(self, controller=None):
         """Actuator communication initialization
@@ -155,12 +226,18 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
         self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
 
-        # Good initial scaling (1 degree for rotation and 1 mm for linear per ustep (um))
-        self.settings.child('scaling', 'use_scaling').setValue(True)
-        self.settings.child('scaling', 'scaling').setValue(1.11111e-5)
+        # Good initial scaling (~1 degree for rotation and ~1 mm for linear)
+        #self.settings.child('scaling', 'use_scaling').setValue(True)
+        #self.settings.child('scaling', 'scaling').setValue(1.11111e-5)
 
         # Hide some useless settings
         self.settings.child('multiaxes').hide()
+
+        # Set initial timeout very large
+        self.settings.child('timeout').setValue(1000)
+
+        # Start thread for camera temp. monitoring
+        self.start_position_monitoring()
 
         info = "Actuator on port {} initialized".format(self.controller.port)
         initialized = True
@@ -208,6 +285,87 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
       self.controller.stop()
       self.move_done()
       self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
+
+    def start_position_monitoring(self):
+        self.pos_thread = QtCore.QThread()
+        self.pos_worker = PositionMonitor(self.controller.motor)
+
+        self.pos_worker.moveToThread(self.pos_thread)
+
+        self.pos_thread.started.connect(self.pos_worker.run)
+        self.pos_worker.position_updated.connect(self.on_position_update)
+        self.pos_worker.finished.connect(self.pos_thread.quit)
+        self.pos_worker.finished.connect(self.pos_worker.deleteLater)
+        self.pos_thread.finished.connect(self.pos_thread.deleteLater)
+
+        self.pos_thread.start()
+
+    def on_position_update(self, pos: int):
+        param = self.settings.child('encoder', 'encoder_position')
+        param.setValue(pos)
+        param.sigValueChanged.emit(param, pos)
+        #if temp > 60:
+        #    self.emit_status(ThreadCommand('Update_Status', [f"WARNING: {self.user_id} camera is too hot !!"]))
+
+    def clean_fav_pos_dict(self, fav_pos_dict):
+        clean_params = []
+
+        # Check if attributes is a list or dictionary
+        if isinstance(fav_pos_dict, dict):
+            items = fav_pos_dict.items()
+        elif isinstance(fav_pos_dict, list):
+            # If it's a list, we assume each item is a parameter (no keys)
+            items = enumerate(fav_pos_dict)  # Use index for 'key'
+        else:
+            raise ValueError(f"Unsupported type for attributes: {type(fav_pos_dict)}")
+
+        for idx, attr in items:
+            param = {}
+
+            param['title'] = attr.get('title', '')
+            param['name'] = attr.get('name', str(idx))  # use index if name is missing
+            param['type'] = attr.get('type', 'str')
+            param['value'] = attr.get('value', '')
+            param['default'] = attr.get('default', None)
+            param['limits'] = attr.get('limits', None)
+            param['readonly'] = attr.get('readonly', False)
+
+            if param['type'] == 'group' and 'children' in attr:
+                children = attr['children']
+                # If children is a dict, convert to a list
+                if isinstance(children, dict):
+                    children = list(children.values())
+                param['children'] = self.clean_fav_pos_dict(children)
+
+            clean_params.append(param)
+
+        return clean_params
+    def add_params_to_settings(self, params):
+        existing_group_names = {child.name() for child in self.settings.children()}
+
+        for attr in params:
+            attr_name = attr['name']
+            if attr.get('type') == 'group':
+                if attr_name not in existing_group_names:
+                    self.settings.addChild(attr)
+                else:
+                    group_param = self.settings.child(attr_name)
+
+                    existing_children = {child.name(): child for child in group_param.children()}
+
+                    expected_children = attr.get('children', [])
+                    for expected in expected_children:
+                        expected_name = expected['name']
+                        if expected_name not in existing_children:
+                            for old_name, old_child in existing_children.items():
+                                if old_child.opts.get('title') == expected.get('title') and old_name != expected_name:
+                                    self.settings.child(attr_name, old_name).show(False)
+                                    break
+
+                            group_param.addChild(expected)
+            else:
+                if attr_name not in existing_group_names:
+                    self.settings.addChild(attr)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,13 @@
+{
+    "Favorite Positions": {
+        "title": "Favorite Positions",
+        "name": "favorite_positions", 
+        "type": "group",
+        "children": {
+            "Go to In": {"title": "Go to In", "name": "go_to_in", "type": "bool_push", "value": false},
+            "In": {"title": "In", "name": "in", "type": "int", "value": 0},
+            "Go to Out": {"title": "Go to Out", "name": "go_to_out", "type": "bool_push", "value": false},
+            "Out": {"title": "Out", "name": "out", "type": "int", "value": 0}
+        }
+    }
+}

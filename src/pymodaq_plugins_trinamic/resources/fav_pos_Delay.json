@@ -1,0 +1,13 @@
+{
+    "Favorite Positions": {
+        "title": "Favorite Positions",
+        "name": "favorite_positions", 
+        "type": "group",
+        "children": {
+            "Go to Zero Delay": {"title": "Go to Zero Delay", "name": "go_to_zero_delay", "type": "bool_push", "value": false},
+            "Zero Delay": {"title": "Zero Delay", "name": "zero_delay", "type": "int", "value": 0},
+            "Go to -2 ps": {"title": "Go to -2 ps", "name": "go_to_-2ps", "type": "bool_push", "value": false},
+            "-2 ps": {"title": "-2 ps", "name": "-2ps", "type": "int", "value": 0}
+        }
+    }
+}

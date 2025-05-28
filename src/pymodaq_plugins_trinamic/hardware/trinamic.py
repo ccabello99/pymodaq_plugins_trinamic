@@ -1,4 +1,5 @@
 import platform
+from qtpy import QtCore
 from pytrinamic.connections import SerialTmclInterface, UsbTmclInterface, ConnectionManager
 from serial.tools import list_ports
 import time
@@ -51,6 +52,7 @@ class TrinamicController:
         self.module = None
         self.motor = None
         self.reference_position = 0
+        self.favorite_positions = None
 
     def connect_module(self, module_type, interface) -> None:
         try:
@@ -144,11 +146,11 @@ class TrinamicController:
         if value:
             self.motor.set_axis_parameter(self.motor.AP.ClosedLoopMode, 1)
             while self.motor.get_axis_parameter(self.motor.AP.CLInitFlag) != 1:
-                time.sleep(1)
+                QtCore.QThread.msleep(100)
         else:
             self.motor.set_axis_parameter(self.motor.AP.ClosedLoopMode, 0)
             while self.motor.get_axis_parameter(self.motor.AP.CLInitFlag) != 0:
-                time.sleep(1)
+                QtCore.QThread.msleep(100)
 
     def set_relative_motion(self) -> None:
         self.motor.set_axis_parameter(self.motor.AP.RelativePositioningOption, 1)
@@ -172,3 +174,26 @@ class TrinamicController:
     
     def stop(self) -> None:
         self.motor.stop()
+
+class PositionMonitor(QtCore.QObject):
+    position_updated = QtCore.pyqtSignal(float)
+    finished = QtCore.pyqtSignal()
+
+    def __init__(self, motor_handle, check_interval=100):
+        super().__init__()
+        self._running = True
+        self.motor = motor_handle
+        self.interval = check_interval
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        while self._running:
+            try:
+                encoder_pos = self.motor.get_axis_parameter(self.motor.AP.EncoderPosition)
+                self.position_updated.emit(encoder_pos)
+            except Exception:
+                pass
+            QtCore.QThread.msleep(self.interval)
+        self.finished.emit()
