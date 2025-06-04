@@ -6,19 +6,37 @@ For this to work a coordinator must be instantiated can be done within the dashb
 running: `python -m pyleco.coordinators.coordinator`
 
 """
+"""
+LECO Director instrument plugin are to be used to communicate (and control) remotely real
+instrument plugin through TCP/IP using the LECO Protocol
 
-from typing import Union, List, Dict, Tuple
+For this to work a coordinator must be instantiated can be done within the dashboard or directly
+running: `python -m pyleco.coordinators.coordinator`
+
+"""
+
+from typing import Union
 
 from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_parameters_fun, main,
                                                           DataActuatorType, DataActuator)
+from pymodaq.control_modules.thread_commands import ThreadStatus, ThreadStatusMove
 
 from pymodaq_utils.utils import ThreadCommand
+from pymodaq_utils.utils import find_dict_in_list_from_key_val
+from pymodaq_utils.serialize.factory import SerializableFactory
 from pymodaq_gui.parameter import Parameter
-from pymodaq_gui.utils.utils import mkQApp
 
-from pymodaq.utils.leco.leco_director import LECODirector, leco_parameters
+from pymodaq.utils.leco.leco_director import (LECODirector, leco_parameters, DirectorCommands,
+                                              DirectorReceivedCommands)
 from pymodaq.utils.leco.director_utils import ActuatorDirector
-from pymodaq_utils.serialize.serializer_legacy import DeSerializer
+from pymodaq_plugins_basler.resources.extended_publisher import ExtendedPublisher
+
+from pymodaq_utils.logger import set_logger, get_module_name
+import numpy as np
+import json
+
+logger = set_logger(get_module_name(__file__))
+
 
 class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
     """A control module, which in the dashboard, allows to control a remote Move module.
@@ -37,35 +55,46 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
     """
     settings: Parameter
     controller: ActuatorDirector
+    _axis_names = ['']
+    _controller_units = ['']
+    _epsilon = 1
 
+    params_client = []  # parameters of a client grabber
+    data_actuator_type = DataActuatorType.DataActuator
+    params = comon_parameters_fun(axis_names=_axis_names, epsilon=_epsilon) + leco_parameters+ [
+        {'title': "Director Units", 'name': 'director_units', 'type': 'list', 'value': 'microsteps', 'limits': ['mm', 'um', 'nm', 'ps', 'deg', 'rad']},
+        {'title': 'LECO Logging', 'name': 'leco_log', 'type': 'group', 'children': [
+            {'title': 'Publisher Name', 'name': 'publisher_name', 'type': 'str', 'value': ''},
+            {'title': 'Proxy Server Address', 'name': 'proxy_address', 'type': 'str', 'value': 'localhost', 'default': 'localhost'}, # Either IP or hostname of LECO proxy server
+            {'title': 'Proxy Server Port', 'name': 'proxy_port', 'type': 'int', 'value': 11100, 'default': 11100},
+        ]}
+        ]
 
-    is_multiaxes = False
-    _axis_names: Union[List[str], Dict[str, int]] = ['Axis 1']
-    data_actuator_type = DataActuatorType.float
+    for param_name in ('multiaxes', 'units', 'epsilon', 'bounds', 'scaling'):
+        param_dict = find_dict_in_list_from_key_val(params, 'name', param_name)
+        if param_dict is not None:
+            param_dict['visible'] = False
 
-    message_list = LECODirector.message_list + ["move_abs", 'move_home', 'move_rel',
-                                                'get_actuator_value', 'stop_motion', 'position_is',
-                                                'move_done']
-    socket_types = ["ACTUATOR"]
-    params = comon_parameters_fun(is_multiaxes, axis_names=_axis_names) + leco_parameters
+    def __init__(self, parent=None, params_state=None) -> None:
+        DAQ_Move_base.__init__(self, parent=parent,
+                               params_state=params_state)
+        LECODirector.__init__(self, host=self.settings['host'])
 
-
-    def __init__(self, parent=None, params_state=None, **kwargs) -> None:
-        super().__init__(parent=parent,
-                         params_state=params_state, **kwargs)
         self.register_rpc_methods((
-            self.set_info,
+            self.set_units,  # to set units accordingly to the one of the actor
         ))
-        for method in (
-            self.set_position,
-            self.set_move_done,
-            self.set_x_axis,
-            self.set_y_axis,
-        ):
-            self.listener.register_binary_rpc_method(method, accept_binary_input=True)
 
-    def commit_settings(self, param) -> None:
-        self.commit_leco_settings(param=param)
+        self.register_binary_rpc_methods((
+            self.send_position,  # to display the actor position
+            self.set_move_done,  # to set the move as done
+        ))
+        # To distinguish how to encode positions, it needs to now if it deals
+        # with a json-accepting or a binary-accepting actuator
+        # It is set to False by default. It then use the first received message
+        # from the actuator that should contain its position to decide if it
+        # need to switch to json.
+        self.json = False
+        self.data_publisher = None
 
     def ini_stage(self, controller=None):
         """Actuator communication initialization
@@ -82,102 +111,266 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         initialized: bool
             False if initialization failed otherwise True
         """
-        actor_name = self.settings.child("actor_name").value()
-        self.controller = self.ini_stage_init(  # type: ignore
-            old_controller=controller,
-            new_controller=ActuatorDirector(actor=actor_name, communicator=self.communicator),
-            )
-        try:
-            self.controller.set_remote_name(self.communicator.full_name)  # type: ignore
-        except TimeoutError:
-            print("Timeout setting remote name.")  # TODO change to real logging
+        actor_name = self.settings["actor_name"]
 
-        # for some reason factor of 1e-3 btwn position values for good responsiveness in this module and original module
-        self.settings.child('scaling', 'use_scaling').setValue(True)
-        self.settings.child('scaling', 'scaling').setValue(1e-3)
-        self.settings.child('scaling').hide()
+        if self.is_master:
+            self.controller = ActuatorDirector(actor=actor_name, communicator=self.communicator)
+            try:
+                self.controller.set_remote_name(self.communicator.full_name)  # type: ignore
+            except TimeoutError:
+                logger.warning("Timeout setting remote name.")
+        else:
+            self.controller = controller
 
-
-        # Hide some useless settings
-        self.settings.child('multiaxes').hide()
-        self.settings.child('epsilon').hide()
-        self.settings.child('bounds').hide()
-        self.settings.child('units').hide()
-        self.settings.child('epsilon').setValue(1)
-
-        self.status.info = "LECODirector"
-        self.status.controller = self.controller
-        self.status.initialized = True
-        return self.status
-
-    def move_abs(self, value: DataActuator) -> None:
-        value = self.set_position_with_scaling(value)
-        self.controller.move_abs(position=value)
-        self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(value)]))
-
-    def move_rel(self, value: DataActuator) -> None:
-        value = self.set_position_relative_with_scaling(value)
-        self.controller.move_rel(position=value)
-        self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(value)]))
+        self.json = False
+        # send a command to the Actor whose name is actor_name to send its settings
+        self.controller.get_settings()
         
+        # Allow director units to be different than actor units
+        self.director_units = self.settings.param('director_units').value()
+
+        # Setup data publisher for LECO if data publisher name is set (ideally it should match the LECO actor name)
+        publisher_name = self.settings.child('leco_log', 'publisher_name').value()
+        proxy_address = self.settings.child('leco_log', 'proxy_address').value()
+        proxy_port = self.settings.child('leco_log', 'proxy_port').value()
+        if publisher_name == '':
+            print("Publisher name is not set ! Set this first and then reinitialize for LECO logging.")
+            self.emit_status(ThreadCommand('Update_Status', ["Publisher name is not set ! Set this first and then reinitialize for LECO logging."]))
+        else:
+            self.data_publisher = ExtendedPublisher(full_name=publisher_name, host=proxy_address, port=proxy_port)
+            print(f"Data publisher {publisher_name} initialized for LECO logging")
+            self.emit_status(ThreadCommand('Update_Status', [f"Data publisher {publisher_name} initialized for LECO logging"]))        
+
+        info = f"LECODirector: {self._title} is initialized"
+        initialized = True
+        return info, initialized
+    
+    def commit_settings(self, param) -> None:
+        if param.name() == 'director_units':
+            self.director_units = param.value()
+        
+        self.commit_leco_settings(param=param)
+
+    def move_abs(self, position: DataActuator) -> None:
+        units = self.director_units
+
+        # We will assume that on the actor side, the scaling will always be such that effective units are mm (for linear stages) and deg (for rotation stages)
+        # However, we should be able to provide values remotely in whatever units we want (um, mm, ps (for delays), etc.)
+        position_metadata = position.value()
+        if units == 'mm':
+            current_value_metadata = self.current_value.value()
+        elif units == 'um':
+            position = position * 1e-3
+            current_value_metadata = self.current_value.value() / 1e-3
+            self.current_value = self.current_value * 1e-3
+        elif units == 'nm':
+            position = position * 1e-6
+            current_value_metadata = self.current_value.value() / 1e-6
+            self.current_value = self.current_value * 1e-6
+        elif units == 'ps':
+            position = position * 0.299792458
+            current_value_metadata = self.current_value.value() / 0.299792458
+            self.current_value = self.current_value * 0.299792458
+        elif units == 'rad':
+            position = position * (180 / np.pi)
+            current_value_metadata = self.current_value.value() / (180 / np.pi)
+            self.current_value = self.current_value * (180 / np.pi)
+
+        position = self.check_bound(position)
+        position = self.set_position_with_scaling(position)
+        self.target_value = position
+        if self.json:
+            position = position.value(self.axis_unit)
+        self.controller.move_abs(position=position)            
+        
+        # Tell proxy server we have started a movement
+        metadata = {"actuator_metadata": {}}
+        metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
+        metadata['actuator_metadata']['final_actuator_value'] = position_metadata
+        metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['description'] = f"Moving to {position_metadata} {units} from {current_value_metadata} {units}"
+        
+        if self.data_publisher is not None:
+            self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
+                                            {'metadata': metadata,
+                                            'message_type': 'actuator',
+                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
+
+    def move_rel(self, position: DataActuator) -> None:
+        units = self.director_units
+
+        # We will assume that on the actor side, the scaling will always be such that effective units are mm (for linear stages) and deg (for rotation stages)
+        # However, we should be able to provide values remotely in whatever units we want (um, mm, ps (for delays), etc.)
+        position_metadata = position.value()
+        if units == 'mm':
+            current_value_metadata = self.current_value.value()
+        elif units == 'um':
+            position = position * 1e-3
+            current_value_metadata = self.current_value.value() / 1e-3
+            self.current_value = self.current_value * 1e-3
+        elif units == 'nm':
+            position = position * 1e-6
+            current_value_metadata = self.current_value.value() / 1e-6
+            self.current_value = self.current_value * 1e-6
+        elif units == 'ps':
+            position = position * 0.299792458
+            current_value_metadata = self.current_value.value() / 0.299792458
+            self.current_value = self.current_value * 0.299792458
+        elif units == 'rad':
+            position = position * (180 / np.pi)
+            current_value_metadata = self.current_value.value() / (180 / np.pi)
+            self.current_value = self.current_value * (180 / np.pi)
+
+        position = self.check_bound(self.current_value + position) - self.current_value  # type: ignore  # noqa
+        self.target_value = position + self.current_value
+
+        position = self.set_position_relative_with_scaling(position)
+        if self.json:
+            position = position.value(self.axis_unit)
+        self.controller.move_rel(position=position)
+        
+        # Tell proxy server we have started a movement
+        metadata = {"actuator_metadata": {}}
+        metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
+        metadata['actuator_metadata']['final_actuator_value'] = current_value_metadata + position_metadata
+        metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['description'] = f"Moving to {current_value_metadata + position_metadata} {units} from {current_value_metadata} {units}"
+
+        print(metadata)
+        
+        if self.data_publisher is not None:
+            self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
+                                            {'metadata': metadata,
+                                            'message_type': 'actuator',
+                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
 
     def move_home(self):
+        units = self.director_units
+        self.target_value = 0
+        if units == 'mm':
+            current_value_metadata = self.current_value.value()        
+        if units == 'um':
+            current_value_metadata = self.current_value.value() / 1e-3
+            self.current_value = self.current_value * 1e-3            
+        elif units == 'nm':
+            current_value_metadata = self.current_value.value() / 1e-6
+            self.current_value = self.current_value * 1e-6
+        elif units == 'ps':
+            current_value_metadata = self.current_value.value() / 0.299792458
+            self.current_value = self.current_value * 0.299792458
+        elif units == 'rad':
+            current_value_metadata = self.current_value.value() / (180 / np.pi)
+            self.current_value = self.current_value * (180 / np.pi)
+        # Tell proxy server we have started a movement
+        metadata = {"actuator_metadata": {}}
+        metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
+        metadata['actuator_metadata']['final_actuator_value'] = 0
+        metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['description'] = f"Moving to {0} {units} from {current_value_metadata} {units}"
+        
+        if self.data_publisher is not None:
+            self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
+                                            {'metadata': metadata,
+                                            'message_type': 'actuator',
+                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
         self.controller.move_home()
 
     def get_actuator_value(self) -> DataActuator:
-        """
-        Get the current hardware position with scaling conversion given by
-        `get_position_with_scaling`.
-
-        See Also
-        --------
-            daq_move_base.get_position_with_scaling, daq_utils.ThreadCommand
-        """
+        """ Get the current hardware value """
         self.controller.set_remote_name(self.communicator.full_name)  # to ensure communication
         self.controller.get_actuator_value()
         return self._current_value
 
     def stop_motion(self) -> None:
-        """
-            See Also
-            --------
-            daq_move_base.move_done
-        """
-        self.controller.move_rel(position=0)
-        self.move_done()
+        self.controller.stop_motion()
+        units = self.director_units
+        while self._move_done_sig == False:
+            pass # Wait to emit metadata until move done signal confirmed
+        if units == 'mm':
+            current_value_metadata = self.current_value.value()        
+        elif units == 'um':
+            current_value_metadata = self.current_value.value() / 1e-3
+            self.current_value = self.current_value * 1e-3            
+        elif units == 'nm':
+            current_value_metadata = self.current_value.value() / 1e-6
+            self.current_value = self.current_value * 1e-6
+        elif units == 'ps':
+            current_value_metadata = self.current_value.value() / 0.299792458
+            self.current_value = self.current_value * 0.299792458
+        elif units == 'rad':
+            current_value_metadata = self.current_value.value() / (180 / np.pi)
+            self.current_value = self.current_value * (180 / np.pi)
+        # Tell proxy server we have stopped
+        metadata = {"actuator_metadata": {}}
+        metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
+        metadata['actuator_metadata']['final_actuator_value'] = None
+        metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['description'] = f"Stopped at {current_value_metadata} {units}"
+        
+        if self.data_publisher is not None:
+            self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
+                                            {'metadata': metadata,
+                                            'message_type': 'actuator',
+                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
 
     # Methods accessible via remote calls
     def _set_position_value(
         self, position: Union[str, float, None], additional_payload=None
     ) -> DataActuator:
-        if position:
-            if isinstance(position, str):
-                deserializer = DeSerializer.from_b64_string(position)
-                pos = deserializer.dwa_deserialization()
-            else:
-                pos = DataActuator(data=position)
-        elif additional_payload is not None:
-            pos = DeSerializer(additional_payload[0]).dwa_deserialization()
+
+        # This is the first received message, if position is set then
+        # it's included in the json payload and the director should
+        # usejson
+        if position is not None:
+            pos = DataActuator(data=position)
+            self.json = True
+        elif additional_payload:
+            pos = SerializableFactory().get_apply_deserializer(additional_payload[0])
         else:
             raise ValueError("No position given")
         pos = self.get_position_with_scaling(pos)  # type: ignore
         self._current_value = pos
         return pos
 
-    def set_position(self, position: Union[str, float, None], additional_payload=None) -> None:
+    def send_position(self, position: Union[str, float, None], additional_payload=None) -> None:
         pos = self._set_position_value(position=position, additional_payload=additional_payload)
-        self.emit_status(ThreadCommand('get_actuator_value', [pos]))
+        self.emit_status(ThreadCommand(ThreadStatusMove.GET_ACTUATOR_VALUE, pos))
 
     def set_move_done(self, position: Union[str, float, None], additional_payload=None) -> None:
         pos = self._set_position_value(position=position, additional_payload=additional_payload)
-        self.emit_status(ThreadCommand('move_done', [pos]))
+        self.emit_status(ThreadCommand(ThreadStatusMove.MOVE_DONE, pos))
+        self._move_done_sig = True
+        # Tell proxy server that the move is done
+        current_value = self.current_value
+        units = self.director_units
+        metadata = {"actuator_metadata": {}}
+        metadata['actuator_metadata']['current_actuator_value'] = current_value.value()
+        metadata['actuator_metadata']['final_actuator_value'] = None
+        metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['description'] = "Move done !"
+        
+        if self.data_publisher is not None:
+            self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
+                                            {'metadata': metadata,
+                                            'message_type': 'actuator',
+                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
 
-    def set_x_axis(self, data, label: str = "", units: str = "") -> None:
-        raise NotImplementedError("where is it handled?")
+    def set_units(self, units: str, additional_payload=None) -> None:
+        if units not in self.axis_units:
+            self.axis_units.append(units)
+        self.axis_unit = units
 
-    def set_y_axis(self, data, label: str = "", units: str = "") -> None:
-        raise NotImplementedError("where is it handled?")
+    def set_settings(self, settings: bytes):
+        """ Get the content of the actor settings to pe populated in this plugin
+        'settings_client' parameter
 
+        Then set the plugin units from this information"""
+        super().set_settings(settings)
+        self.axis_unit = self.settings['settings_client', 'units']
+
+    def close(self) -> None:
+        """ Clear the content of the settings_clients setting"""
+        super().close()
 
 if __name__ == '__main__':
     main(__file__, init=False)

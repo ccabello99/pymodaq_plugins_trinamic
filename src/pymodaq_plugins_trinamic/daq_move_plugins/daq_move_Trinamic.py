@@ -10,7 +10,6 @@ from pymodaq_utils.utils import ThreadCommand  # object used to send info back t
 from pymodaq_gui.parameter import Parameter
 from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController, PositionMonitor
 from qtpy import QtCore
-from pymodaq_utils.serialize.serializer_legacy import DeSerializer
 
 from pytrinamic.modules import TMCM1311
 
@@ -27,14 +26,16 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     _controller_units: Union[str, List[str]] = 'dimensionless' # this actually corresponds to microsteps for our controllers
     data_actuator_type = DataActuatorType.DataActuator
 
-    manager = TrinamicManager()
+    # Initialize communication at 
+    manager = TrinamicManager(baudrate=9600)
     devices = manager.probe_tmcl_ports()
 
     params = [
                 {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
                     {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
                     {'title': 'Selected Device:', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
-                    {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'int', 'value': 9600, 'readonly': True},
+                    {"title": "Device User ID", "name": "device_user_id", "type": "str", "value": ""},
+                    {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'list', 'value': '9600', 'limits': ['9600', '14400', '38400', '57600', '115200']}
                 ]},
                 {'title': 'Closed loop?:', 'name': 'closed_loop', 'type': 'led_push', 'value': False, 'default': False},
                 {'title': 'Encoder Settings:', 'name': 'encoder', 'type': 'group', 'children': [
@@ -44,16 +45,16 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 ]},
                 {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
                     {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
-                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}
+                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']},
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
-                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]},
-                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 15000000, 'limits': [1, 30000000]},
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]}, # Be careful going to the maximum !
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 15000000, 'limits': [1, 30000000]}, # Be careful going to the maximum !
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
-                    {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 75, 'limits': [0, 240]},
-                    {'title': 'Standby Current:', 'name': 'standby_current', 'type': 'int', 'value': 8, 'limits': [0, 240]},
-                    {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 240]},
+                    {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 75, 'limits': [0, 240]}, # Be careful going to the maximum !
+                    {'title': 'Standby Current:', 'name': 'standby_current', 'type': 'int', 'value': 8, 'limits': [0, 240]}, # Be careful going to the maximum !
+                    {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 240]}, # Be careful going to the maximum !
                 ]},
                 {'title': 'Favorite Position Settings:', 'name': 'fav_pos_settings', 'type': 'group', 'children': [
                     {'title': 'Favorite Position Dictionary Location:', 'name': 'fav_pos_location', 'type': 'browsepath', 'value': ''},
@@ -119,6 +120,14 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         value = param.value()
         if name == 'closed_loop':
             self.controller.set_closed_loop_mode(value)
+        elif name == 'baudrate':
+            self.manager._baudrate = int(value)
+            if self.controller is not None:
+                self.close()
+                QtCore.QThread.msleep(200) # Avoid communicating too quickly
+                self.ini_stage()
+                self.controller.baudrate = int(value)
+                
         elif name == 'max_velocity':
             self.controller.max_velocity = value
         elif name == 'max_acceleration':
@@ -143,7 +152,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 self.emit_status(ThreadCommand('Update_Status', ["Detecting encoder resolution"]))
                 self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderInitialization, 1)
                 timeout = 0
-                while self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderInitialization) != 2 and timeout < 10:
+                while self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderInitialization) != 2:
                     QtCore.QThread.msleep(100)
                     timeout += 0.1
                     if timeout >= 5:
@@ -162,7 +171,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif name == 'encoder_resolution':
             if value > 0:
                 self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderResolution, value)
-                self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderPosition, 0)
                 self.settings.child('encoder', 'encoder_position').setValue(0)
         elif name == 'load_fav_pos':
             if value:
@@ -174,7 +182,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 param = self.settings.child('fav_pos_settings', 'load_fav_pos')
                 param.setValue(False)
                 param.sigValueChanged.emit(param, False)        
-        if 'go_to_' in name:
+        elif 'go_to_' in name:
             if value:
                 target_name = name.replace("go_to_", "")
                 target_value = self.settings.child('favorite_positions', target_name).value()
@@ -182,7 +190,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 self.emit_status(ThreadCommand('Update_Status', ['Moving to favorite position: {}'.format(target_name)]))
                 param = self.settings.child('favorite_positions', name)
                 param.setValue(False)
-                param.sigValueChanged.emit(param, False)
+                param.sigValueChanged.emit(param, False)      
+        elif name == 'use_scaling':
+            # Update current value in UI
+            self.poll_moving()
         
 
     def ini_stage(self, controller=None):
@@ -226,17 +237,18 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
         self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
 
-        # Good initial scaling (~1 degree for rotation and ~1 mm for linear)
+        # Good initial scaling for testing (~1 degree for rotation and ~1 mm for linear)
         #self.settings.child('scaling', 'use_scaling').setValue(True)
         #self.settings.child('scaling', 'scaling').setValue(1.11111e-5)
 
         # Hide some useless settings
         self.settings.child('multiaxes').hide()
+        self.settings.child('epsilon').hide()
 
         # Set initial timeout very large
         self.settings.child('timeout').setValue(1000)
 
-        # Start thread for camera temp. monitoring
+        # Start threads for encoder position and limit switch monitoring
         self.start_position_monitoring()
 
         info = "Actuator on port {} initialized".format(self.controller.port)
@@ -244,38 +256,39 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         print(info)
         return info, initialized
 
-    def move_abs(self, value: DataActuator):
-        """ Move the actuator to the absolute target defined by value
+    def move_abs(self, position: DataActuator):
+        """ Move the actuator to the absolute target defined by position
 
         Parameters
         ----------
-        value: (float) value of the absolute target positioning
+        position: (float) value of the absolute target positioning
         """
-
-        value = self.check_bound(value)  #if user checked bounds, the defined bounds are applied here
-        self.target_value = value
-        value = self.set_position_with_scaling(value)  # apply scaling if the user specified one
+        position = self.check_bound(position)  #if user checked bounds, the defined bounds are applied here
+        self.target_value = position
+        position = self.set_position_with_scaling(position)  # apply scaling if the user specified one
         self.controller.set_absolute_motion()
-        self.controller.move_to(int(round(value.value())))
+        self.controller.move_to(int(round(position.value())))
         
-        self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(self.get_position_with_scaling(value).value())]))
+        self.emit_status(ThreadCommand('Update_Status', ['Moving to absolute position: {}'.format(self.get_position_with_scaling(position).value())]))
 
-    def move_rel(self, value: DataActuator):
-        """ Move the actuator to the relative target actuator value defined by value
+    def move_rel(self, position: DataActuator):
+        """ Move the actuator to the relative target actuator value defined by position
 
         Parameters
         ----------
-        value: (float) value of the relative target positioning
+        position: (float) value of the relative target positioning
         """
-        value = self.check_bound(self.current_position + value) - self.current_position
-        self.target_value = value + self.current_position
-        value = self.set_position_relative_with_scaling(value)
+        position = self.check_bound(self.current_position + position) - self.current_position
+        self.target_value = position + self.current_position
+        position = self.set_position_relative_with_scaling(position)
         self.controller.set_relative_motion()
-        self.controller.move_by(int(round(value.value())))
-        self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(self.get_position_with_scaling(value).value())]))
+        self.controller.move_by(int(round(position.value())))
+
+        self.emit_status(ThreadCommand('Update_Status', ['Moving by: {}'.format(self.get_position_with_scaling(position).value())]))
 
     def move_home(self):
         """Call the reference method of the controller"""
+        self.target_value = 0
         self.controller.move_to_reference()
         self.emit_status(ThreadCommand('Update_Status', ['Moving to zero position']))
         self.poll_moving()
@@ -304,8 +317,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         param = self.settings.child('encoder', 'encoder_position')
         param.setValue(pos)
         param.sigValueChanged.emit(param, pos)
-        #if temp > 60:
-        #    self.emit_status(ThreadCommand('Update_Status', [f"WARNING: {self.user_id} camera is too hot !!"]))
 
     def clean_fav_pos_dict(self, fav_pos_dict):
         clean_params = []
@@ -340,6 +351,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             clean_params.append(param)
 
         return clean_params
+    
     def add_params_to_settings(self, params):
         existing_group_names = {child.name() for child in self.settings.children()}
 

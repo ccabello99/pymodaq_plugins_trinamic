@@ -6,10 +6,11 @@ import time
 
 
 class TrinamicManager:
-    def __init__(self):
+    def __init__(self, baudrate):
         self.ports = None
         self.connections = []
         self.interfaces = []
+        self._baudrate = baudrate
 
     def probe_tmcl_ports(self):
         self.ports = []
@@ -26,7 +27,7 @@ class TrinamicManager:
 
     def connect(self, port):
         try:
-            conn = UsbTmclInterface(port, datarate=9600)
+            conn = UsbTmclInterface(port, datarate=self._baudrate)
             self.interfaces.append(conn)
             self.connections.append(port)
         except Exception as e:
@@ -65,6 +66,14 @@ class TrinamicController:
             self.motor = self.module.motors[0]
         except Exception as e:
             print(f"Failed to connect to motor: {e}")
+
+    @property 
+    def baudrate(self):
+        return self.get_global_parameter(self.motor.GP0.serialBaudRate)
+    
+    @baudrate.setter
+    def baudrate(self, value):
+        self.set_global_parameter(self.motor.GP0.serialBaudRate, value)
 
     @property 
     def max_current(self):
@@ -162,6 +171,9 @@ class TrinamicController:
         self.stop()
         self.motor.set_axis_parameter(self.motor.AP.ActualPosition, 0)
         self.stop()
+
+    def rotate(self, direction: int) -> None:
+        self.motor.rotate(direction * self.motor.linear_ramp.max_velocity)
     
     def move_to(self, position) -> None:
         self.motor.move_to(position, self.motor.linear_ramp.max_velocity)
@@ -179,7 +191,7 @@ class PositionMonitor(QtCore.QObject):
     position_updated = QtCore.pyqtSignal(float)
     finished = QtCore.pyqtSignal()
 
-    def __init__(self, motor_handle, check_interval=100):
+    def __init__(self, motor_handle, check_interval=500):
         super().__init__()
         self._running = True
         self.motor = motor_handle
