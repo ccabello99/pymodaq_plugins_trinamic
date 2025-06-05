@@ -95,6 +95,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         # need to switch to json.
         self.json = False
         self.data_publisher = None
+        self.director_units = None
 
     def ini_stage(self, controller=None):
         """Actuator communication initialization
@@ -128,6 +129,9 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         
         # Allow director units to be different than actor units
         self.director_units = self.settings.param('director_units').value()
+
+        # Set initial timeout very large
+        self.settings.child('timeout').setValue(1000)
 
         # Setup data publisher for LECO if data publisher name is set (ideally it should match the LECO actor name)
         publisher_name = self.settings.child('leco_log', 'publisher_name').value()
@@ -188,6 +192,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
         metadata['actuator_metadata']['final_actuator_value'] = position_metadata
         metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['message_type'] = "move_start"
         metadata['actuator_metadata']['description'] = f"Moving to {position_metadata} {units} from {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
@@ -234,9 +239,8 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
         metadata['actuator_metadata']['final_actuator_value'] = current_value_metadata + position_metadata
         metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['message_type'] = "move_start"
         metadata['actuator_metadata']['description'] = f"Moving to {current_value_metadata + position_metadata} {units} from {current_value_metadata} {units}"
-
-        print(metadata)
         
         if self.data_publisher is not None:
             self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
@@ -266,6 +270,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
         metadata['actuator_metadata']['final_actuator_value'] = 0
         metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['message_type'] = "move_start"
         metadata['actuator_metadata']['description'] = f"Moving to {0} {units} from {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
@@ -305,6 +310,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['current_actuator_value'] = current_value_metadata
         metadata['actuator_metadata']['final_actuator_value'] = None
         metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['message_type'] = "move_stop"
         metadata['actuator_metadata']['description'] = f"Stopped at {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
@@ -347,6 +353,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['current_actuator_value'] = current_value.value()
         metadata['actuator_metadata']['final_actuator_value'] = None
         metadata['actuator_metadata']['units'] = units
+        metadata['actuator_metadata']['message_type'] = "move_done"
         metadata['actuator_metadata']['description'] = "Move done !"
         
         if self.data_publisher is not None:

@@ -137,7 +137,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif name == 'set_reference_position':
             if value:
                 self.controller.set_reference_position()
-                self.settings.child('positioning', 'set_reference_position').setValue(False)
+                param = self.settings.child('positioning', 'set_reference_position')
+                param.setValue(False)
+                param.sigValueChanged.emit(param, False)
                 self.poll_moving()
         elif name =='max_current':
             self.controller.max_current = value
