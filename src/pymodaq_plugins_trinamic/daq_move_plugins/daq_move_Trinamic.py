@@ -56,10 +56,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                     {'title': 'Standby Current:', 'name': 'standby_current', 'type': 'int', 'value': 8, 'limits': [0, 240]}, # Be careful going to the maximum !
                     {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 240]}, # Be careful going to the maximum !
                 ]},
-                {'title': 'Favorite Position Settings:', 'name': 'fav_pos_settings', 'type': 'group', 'children': [
-                    {'title': 'Favorite Position Dictionary Location:', 'name': 'fav_pos_location', 'type': 'browsepath', 'value': ''},
-                    {'title': 'Load Favorite Positions ?:', 'name': 'load_fav_pos', 'type': 'bool_push', 'value': False},
-                ]},
         ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names)
 
     def ini_attributes(self):
@@ -173,17 +169,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif name == 'encoder_resolution':
             if value > 0:
                 self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderResolution, value)
-                self.settings.child('encoder', 'encoder_position').setValue(0)
-        elif name == 'load_fav_pos':
-            if value:
-                filepath = self.settings.child('fav_pos_settings', 'fav_pos_location').value()
-                with open(filepath, 'r') as file:
-                    attributes = json.load(file)
-                    self.controller.favorite_positions = self.clean_fav_pos_dict(attributes)
-                    self.add_params_to_settings(self.controller.favorite_positions)
-                param = self.settings.child('fav_pos_settings', 'load_fav_pos')
-                param.setValue(False)
-                param.sigValueChanged.emit(param, False)        
+                self.settings.child('encoder', 'encoder_position').setValue(0)     
         elif 'go_to_' in name:
             if value:
                 target_name = name.replace("go_to_", "")
@@ -319,67 +305,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         param = self.settings.child('encoder', 'encoder_position')
         param.setValue(pos)
         param.sigValueChanged.emit(param, pos)
-
-    def clean_fav_pos_dict(self, fav_pos_dict):
-        clean_params = []
-
-        # Check if attributes is a list or dictionary
-        if isinstance(fav_pos_dict, dict):
-            items = fav_pos_dict.items()
-        elif isinstance(fav_pos_dict, list):
-            # If it's a list, we assume each item is a parameter (no keys)
-            items = enumerate(fav_pos_dict)  # Use index for 'key'
-        else:
-            raise ValueError(f"Unsupported type for attributes: {type(fav_pos_dict)}")
-
-        for idx, attr in items:
-            param = {}
-
-            param['title'] = attr.get('title', '')
-            param['name'] = attr.get('name', str(idx))  # use index if name is missing
-            param['type'] = attr.get('type', 'str')
-            param['value'] = attr.get('value', '')
-            param['default'] = attr.get('default', None)
-            param['limits'] = attr.get('limits', None)
-            param['readonly'] = attr.get('readonly', False)
-
-            if param['type'] == 'group' and 'children' in attr:
-                children = attr['children']
-                # If children is a dict, convert to a list
-                if isinstance(children, dict):
-                    children = list(children.values())
-                param['children'] = self.clean_fav_pos_dict(children)
-
-            clean_params.append(param)
-
-        return clean_params
-    
-    def add_params_to_settings(self, params):
-        existing_group_names = {child.name() for child in self.settings.children()}
-
-        for attr in params:
-            attr_name = attr['name']
-            if attr.get('type') == 'group':
-                if attr_name not in existing_group_names:
-                    self.settings.addChild(attr)
-                else:
-                    group_param = self.settings.child(attr_name)
-
-                    existing_children = {child.name(): child for child in group_param.children()}
-
-                    expected_children = attr.get('children', [])
-                    for expected in expected_children:
-                        expected_name = expected['name']
-                        if expected_name not in existing_children:
-                            for old_name, old_child in existing_children.items():
-                                if old_child.opts.get('title') == expected.get('title') and old_name != expected_name:
-                                    self.settings.child(attr_name, old_name).show(False)
-                                    break
-
-                            group_param.addChild(expected)
-            else:
-                if attr_name not in existing_group_names:
-                    self.settings.addChild(attr)
 
 
 if __name__ == '__main__':
