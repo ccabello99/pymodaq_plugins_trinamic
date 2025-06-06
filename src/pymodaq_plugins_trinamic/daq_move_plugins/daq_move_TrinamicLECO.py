@@ -15,7 +15,7 @@ running: `python -m pyleco.coordinators.coordinator`
 
 """
 
-from typing import Union
+from typing import Union, Optional
 
 from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_parameters_fun, main,
                                                           DataActuatorType, DataActuator)
@@ -75,7 +75,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         if param_dict is not None:
             param_dict['visible'] = False
 
-    def __init__(self, parent=None, params_state=None) -> None:
+    def __init__(self, actor_name: Optional[str], parent=None, params_state=None) -> None:
         DAQ_Move_base.__init__(self, parent=parent,
                                params_state=params_state)
         LECODirector.__init__(self, host=self.settings['host'])
@@ -96,6 +96,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         self.json = False
         self.data_publisher = None
         self.director_units = None
+        self.settings.param('actor_name').setValue(actor_name)
 
     def ini_stage(self, controller=None):
         """Actuator communication initialization
