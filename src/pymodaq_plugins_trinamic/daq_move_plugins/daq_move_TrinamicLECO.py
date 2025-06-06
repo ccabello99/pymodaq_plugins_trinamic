@@ -29,7 +29,7 @@ from pymodaq_gui.parameter import Parameter
 from pymodaq.utils.leco.leco_director import (LECODirector, leco_parameters, DirectorCommands,
                                               DirectorReceivedCommands)
 from pymodaq.utils.leco.director_utils import ActuatorDirector
-from pymodaq_plugins_basler.resources.extended_publisher import ExtendedPublisher
+from pymodaq_plugins_trinamic.resources.extended_publisher import ExtendedPublisher
 
 from pymodaq_utils.logger import set_logger, get_module_name
 import numpy as np
