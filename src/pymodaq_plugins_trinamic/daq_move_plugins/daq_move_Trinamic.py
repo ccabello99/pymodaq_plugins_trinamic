@@ -27,7 +27,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     data_actuator_type = DataActuatorType.DataActuator
 
     # Initialize communication at 
-    manager = TrinamicManager(baudrate=9600)
+    manager = TrinamicManager(baudrate=115200)
     devices = manager.probe_tmcl_ports()
 
     params = [
@@ -35,7 +35,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                     {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
                     {'title': 'Selected Device:', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
                     {"title": "Device User ID", "name": "device_user_id", "type": "str", "value": ""},
-                    {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'list', 'value': '9600', 'limits': ['9600', '14400', '38400', '57600', '115200']}
+                    {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'str', 'value': '115200', 'readonly': True}
                 ]},
                 {'title': 'Closed loop?:', 'name': 'closed_loop', 'type': 'led_push', 'value': False, 'default': False},
                 {'title': 'Encoder Settings:', 'name': 'encoder', 'type': 'group', 'children': [
@@ -116,14 +116,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         value = param.value()
         if name == 'closed_loop':
             self.controller.set_closed_loop_mode(value)
-        elif name == 'baudrate':
-            self.manager._baudrate = int(value)
-            if self.controller is not None:
-                self.close()
-                QtCore.QThread.msleep(200) # Avoid communicating too quickly
-                self.ini_stage()
-                self.controller.baudrate = int(value)
-                
         elif name == 'max_velocity':
             self.controller.max_velocity = value
         elif name == 'max_acceleration':
@@ -169,16 +161,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif name == 'encoder_resolution':
             if value > 0:
                 self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderResolution, value)
-                self.settings.child('encoder', 'encoder_position').setValue(0)     
-        elif 'go_to_' in name:
-            if value:
-                target_name = name.replace("go_to_", "")
-                target_value = self.settings.child('favorite_positions', target_name).value()
-                self.move_abs(DataActuator(data=target_value))
-                self.emit_status(ThreadCommand('Update_Status', ['Moving to favorite position: {}'.format(target_name)]))
-                param = self.settings.child('favorite_positions', name)
-                param.setValue(False)
-                param.sigValueChanged.emit(param, False)      
+                self.settings.child('encoder', 'encoder_position').setValue(0)    
         elif name == 'use_scaling':
             # Update current value in UI
             self.poll_moving()
@@ -239,7 +222,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         # Start threads for encoder position and limit switch monitoring
         self.start_position_monitoring()
 
-        info = "Actuator on port {} initialized".format(self.controller.port)
+        info = f"Actuator on port {self.controller.port} initialized with baudrate {self.manager._baudrate}"
         initialized = True
         print(info)
         return info, initialized

@@ -68,14 +68,6 @@ class TrinamicController:
             print(f"Failed to connect to motor: {e}")
 
     @property 
-    def baudrate(self):
-        return self.get_global_parameter(self.motor.GP0.serialBaudRate)
-    
-    @baudrate.setter
-    def baudrate(self, value):
-        self.set_global_parameter(self.motor.GP0.serialBaudRate, value)
-
-    @property 
     def max_current(self):
         return self.motor.drive_settings.max_current
     
