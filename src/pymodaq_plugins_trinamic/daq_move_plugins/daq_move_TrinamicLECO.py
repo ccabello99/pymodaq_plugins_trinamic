@@ -197,10 +197,11 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['description'] = f"Moving to {position_metadata} {units} from {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
+            serial_number = f"{self.settings.child('settings_client', 'device_manager', 'device_serial_number').value()}_{self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}"
             self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
                                             {'metadata': metadata,
                                             'message_type': 'actuator',
-                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
+                                            'serial_number': serial_number}})
 
     def move_rel(self, position: DataActuator) -> None:
         units = self.director_units
@@ -244,10 +245,11 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['description'] = f"Moving to {current_value_metadata + position_metadata} {units} from {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
+            serial_number = f"{self.settings.child('settings_client', 'device_manager', 'device_serial_number').value()}_{self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}"
             self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
                                             {'metadata': metadata,
                                             'message_type': 'actuator',
-                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
+                                            'serial_number': serial_number}})
 
     def move_home(self):
         units = self.director_units
@@ -275,10 +277,11 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['description'] = f"Moving to {0} {units} from {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
+            serial_number = f"{self.settings.child('settings_client', 'device_manager', 'device_serial_number').value()}_{self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}"
             self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
                                             {'metadata': metadata,
                                             'message_type': 'actuator',
-                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
+                                            'serial_number': serial_number}})
         self.controller.move_home()
 
     def get_actuator_value(self) -> DataActuator:
@@ -315,10 +318,11 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['description'] = f"Stopped at {current_value_metadata} {units}"
         
         if self.data_publisher is not None:
+            serial_number = f"{self.settings.child('settings_client', 'device_manager', 'device_serial_number').value()}_{self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}"
             self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
                                             {'metadata': metadata,
                                             'message_type': 'actuator',
-                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
+                                            'serial_number': serial_number}})
 
     # Methods accessible via remote calls
     def _set_position_value(
@@ -358,10 +362,11 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         metadata['actuator_metadata']['description'] = "Move done !"
         
         if self.data_publisher is not None:
+            serial_number = f"{self.settings.child('settings_client', 'device_manager', 'device_serial_number').value()}_{self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}"
             self.data_publisher.send_data2({self.settings.child('leco_log', 'publisher_name').value():
                                             {'metadata': metadata,
                                             'message_type': 'actuator',
-                                            'user_id': self.settings.child('settings_client', 'device_manager', 'device_user_id').value()}})
+                                            'serial_number': serial_number}})
 
     def set_units(self, units: str, additional_payload=None) -> None:
         if units not in self.axis_units:

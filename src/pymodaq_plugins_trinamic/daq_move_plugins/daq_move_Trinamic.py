@@ -34,6 +34,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
                     {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
                     {'title': 'Selected Device:', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
+                    {"title": "Device Serial Number", "name": "device_serial_number", "type": "str", "value": "", 'readonly': True},
                     {"title": "Device User ID", "name": "device_user_id", "type": "str", "value": ""},
                     {'title': 'Baudrate:', 'name': 'baudrate', 'type': 'str', 'value': '115200', 'readonly': True}
                 ]},
@@ -60,6 +61,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
     def ini_attributes(self):
         self.controller: TrinamicController = None
+        self.user_id = None
 
     def get_actuator_value(self):
         """Get the current value from the hardware with scaling conversion.
@@ -165,6 +167,8 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         elif name == 'use_scaling':
             # Update current value in UI
             self.poll_moving()
+        elif name == 'device_user_id':
+            self.user_id = value
         
 
     def ini_stage(self, controller=None):
@@ -183,18 +187,22 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         """
         # Always get a fresh list on device initialization
         devices = self.manager.probe_tmcl_ports()
-        self.settings.child('device_manager', 'connected_devices').setLimits(devices)
+        self.settings.child('device_manager', 'connected_devices').setLimits(devices['ports'])
+        index = devices['ports'].index(self.settings.child('device_manager', 'connected_devices').value())
+        device_info = {'port': devices['ports'][index], 'serial_number': devices['serial_numbers'][index]}
+        self.user_id = self.settings.child('device_manager', 'device_user_id').value()
 
         self.ini_stage_init(slave_controller=controller)  # will be useful when controller is slave
 
         if self.is_master:  # is needed when controller is master
-            self.controller = TrinamicController(self.settings.child('device_manager', 'connected_devices').value())
+            self.controller = TrinamicController(device_info)
         
         # Establish connection
         self.manager.connect(self.controller.port)
         self.controller.connect_module(TMCM1311, self.manager.interfaces[self.manager.connections.index(self.controller.port)])
         self.controller.connect_motor()
         self.settings.child('device_manager', 'selected_device').setValue(self.controller.port)
+        self.settings.child('device_manager', 'device_serial_number').setValue(self.controller.serial_number)
 
         # Preparing drive settings
         self.controller.max_current = self.settings.child('drive', 'max_current').value()

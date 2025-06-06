@@ -7,23 +7,25 @@ import time
 
 class TrinamicManager:
     def __init__(self, baudrate):
-        self.ports = None
+        self.devices = None
         self.connections = []
         self.interfaces = []
         self._baudrate = baudrate
 
     def probe_tmcl_ports(self):
-        self.ports = []
+        self.devices = {'ports':[], 'serial_numbers':[]}
         ports = list_ports.comports()
 
         for port in ports:
             try:
                 conn = UsbTmclInterface(port.device, datarate=9600)
-                self.ports.append(port.device)
+                if port.manufacturer == 'Trinamic Motion Control':
+                    self.devices['ports'].append(port.device)
+                    self.devices['serial_numbers'].append(port.serial_number)
                 conn.close()
             except Exception as e:
                 pass
-        return self.ports
+        return self.devices
 
     def connect(self, port):
         try:
@@ -48,8 +50,9 @@ class TrinamicManager:
         
 
 class TrinamicController:
-    def __init__(self, port):
-        self.port = port
+    def __init__(self, device_info):
+        self.port = device_info['port']
+        self.serial_number = device_info['serial_number']
         self.module = None
         self.motor = None
         self.reference_position = 0
