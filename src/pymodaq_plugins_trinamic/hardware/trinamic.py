@@ -4,6 +4,9 @@ from pytrinamic.connections import SerialTmclInterface, UsbTmclInterface, Connec
 from serial.tools import list_ports
 import time
 
+if not hasattr(QtCore, "pyqtSignal"):
+    QtCore.pyqtSignal = QtCore.Signal  # type: ignore
+
 
 class TrinamicManager:
     def __init__(self, baudrate):
