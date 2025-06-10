@@ -96,6 +96,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         self.json = False
         self.data_publisher = None
         self.director_units = None
+        self._move_done_sig = False
         self.settings.param('actor_name').setValue(actor_name)
 
     def ini_stage(self, controller=None):
