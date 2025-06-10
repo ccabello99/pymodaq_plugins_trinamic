@@ -156,9 +156,9 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         
         self.commit_leco_settings(param=param)
 
-    def move_abs(self, position: DataActuator) -> None:
+    def move_abs(self, position: float) -> None:
         units = self.director_units
-
+        position = DataActuator(data=position)
         # We will assume that on the actor side, the scaling will always be such that effective units are mm (for linear stages) and deg (for rotation stages)
         # However, we should be able to provide values remotely in whatever units we want (um, mm, ps (for delays), etc.)
         position_metadata = position.value()
@@ -203,8 +203,9 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
                                             'message_type': 'actuator',
                                             'serial_number': serial_number}})
 
-    def move_rel(self, position: DataActuator) -> None:
+    def move_rel(self, position: float) -> None:
         units = self.director_units
+        position = DataActuator(data=position)
 
         # We will assume that on the actor side, the scaling will always be such that effective units are mm (for linear stages) and deg (for rotation stages)
         # However, we should be able to provide values remotely in whatever units we want (um, mm, ps (for delays), etc.)
