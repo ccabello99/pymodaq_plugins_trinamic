@@ -13,6 +13,7 @@ from qtpy import QtCore
 
 from pytrinamic.modules import TMCM1311
 
+_last_read_time = 0
 
 class DAQ_Move_Trinamic(DAQ_Move_base):
     """
@@ -32,7 +33,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
     params = [
                 {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
-                    {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices},
+                    {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices['ports']},
                     {'title': 'Selected Device:', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
                     {"title": "Device Serial Number", "name": "device_serial_number", "type": "str", "value": "", 'readonly': True},
                     {"title": "Device User ID", "name": "device_user_id", "type": "str", "value": ""},
@@ -64,32 +65,32 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.user_id = None
 
     def get_actuator_value(self):
-        """Get the current value from the hardware with scaling conversion.
+        global _last_read_time
+        now = time.time()
+        min_interval = 0.15  # seconds
+        elapsed = now - _last_read_time
+        if elapsed < min_interval:
+            QtCore.QThread.msleep(int((min_interval - elapsed) * 1000))
+        _last_read_time = time.time()
 
-        Returns
-        -------
-        float: The position obtained after scaling conversion.
-        """
-        # Block (kinda) to avoid reading the position too fast (bad for controller)
-        QtCore.QThread.msleep(200)
         pos = DataActuator(data=self.controller.actual_position)
         pos = self.get_position_with_scaling(pos)
         return pos
 
     def user_condition_to_reach_target(self) -> bool:
-        """ Implement a condition for exiting the polling mechanism and specifying that the
-        target value has been reached
+        """Adaptive polling to check if the target is reached."""
+        max_wait_ms = 1000  # max time to wait
+        elapsed = 0
+        delay = 10  # start with a small delay in ms
 
-       Returns
-        -------
-        bool: if True, PyMoDAQ considers the target value has been reached
-        """
-        # Block (kinda) until the target position is reached for same reason as above
-        QtCore.QThread.msleep(200)
-        if self.controller.motor.get_position_reached():
-            return True
-        else:
-            return False        
+        while elapsed < max_wait_ms:
+            if self.controller.motor.get_position_reached():
+                return True
+            QtCore.QThread.msleep(int(delay))
+            elapsed += delay
+            delay = min(delay * 1.5, 100)  # back off up to 100ms max delay
+
+        return False  # timeout: assume not reached   
 
     def close(self):
         """Terminate the communication protocol"""
@@ -299,4 +300,4 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
 
 if __name__ == '__main__':
-    main(__file__)
+    main(__file__, init=False)
