@@ -214,6 +214,11 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         #self.settings.child('scaling', 'use_scaling').setValue(True)
         #self.settings.child('scaling', 'scaling').setValue(1.11111e-5)
 
+        # Make sure end stops are enabled by default
+        self.controller.motor.set_axis_parameter(self.controller.motor.AP.RightLimitSwitchDiable, 0)
+        self._throttle_polling(10)
+        self.controller.motor.set_axis_parameter(self.controller.motor.AP.LeftLimitSwitchDisable, 0)
+
         # Hide some useless settings
         self.settings.child('multiaxes').hide()
         self.settings.child('epsilon').hide()
@@ -282,6 +287,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             # Throttle before setting actual position
             self._throttle_polling(10)
             self.controller.motor.set_axis_parameter(self.controller.motor.AP.ActualPosition, self.settings.child('positioning', 'left_end_stop_pos').value())
+            self.stop_motion()
             
         else:
             self.stop_motion()
@@ -290,6 +296,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             # Throttle before setting actual position
             self._throttle_polling(10)
             self.controller.motor.set_axis_parameter(self.controller.motor.AP.ActualPosition, self.settings.child('positioning', 'left_end_stop_pos').value())
+            self.stop_motion()
 
     def _throttle_polling(self, min_interval_ms: float = 10.0):
         """Ensures that polls to the hardware are not too frequent."""
