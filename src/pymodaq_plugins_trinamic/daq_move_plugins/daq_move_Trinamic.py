@@ -278,7 +278,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         if endstop == 'left':
             self.stop_motion()
             self.emit_status(ThreadCommand('Update_Status', ['Left end stop hit']))
-            self.current_value = DataActuator(data=self.settings.child('positioning', 'left_end_stop_pos'))
+            self.current_value = DataActuator(data=self.settings.child('positioning', 'left_end_stop_pos').value())
             # Throttle before setting actual position
             self._throttle_polling(10)
             self.controller.motor.set_axis_parameter(self.controller.motor.AP.ActualPosition, self.settings.child('positioning', 'left_end_stop_pos').value())
@@ -286,7 +286,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         else:
             self.stop_motion()
             self.emit_status(ThreadCommand('Update_Status', ['Right end stop hit']))
-            self.current_value = DataActuator(data=self.settings.child('positioning', 'right_end_stop_pos'))
+            self.current_value = DataActuator(data=self.settings.child('positioning', 'right_end_stop_pos').value())
             # Throttle before setting actual position
             self._throttle_polling(10)
             self.controller.motor.set_axis_parameter(self.controller.motor.AP.ActualPosition, self.settings.child('positioning', 'left_end_stop_pos').value())
