@@ -8,12 +8,10 @@ from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_p
 
 from pymodaq_utils.utils import ThreadCommand  # object used to send info back to the main thread
 from pymodaq_gui.parameter import Parameter
-from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController, PositionMonitor
+from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController, EndStopHitSignal
 from qtpy import QtCore
 
 from pytrinamic.modules import TMCM1311
-
-_last_read_time = 0
 
 class DAQ_Move_Trinamic(DAQ_Move_base):
     """
@@ -48,6 +46,8 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
                     {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
                     {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']},
+                    {'title': 'Left End Stop Position:', 'name': 'left_end_stop_pos', 'type': 'float', 'value': 0},
+                    {'title': 'Right End Stop Position:', 'name': 'right_end_stop_pos', 'type': 'float', 'value': 100},
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
                     {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]}, # Be careful going to the maximum !
@@ -63,34 +63,33 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     def ini_attributes(self):
         self.controller: TrinamicController = None
         self.user_id = None
+        self._last_poll_time = 0.0  # Used to throttle polling frequency
 
     def get_actuator_value(self):
-        global _last_read_time
-        now = time.time()
-        min_interval = 0.15  # seconds
-        elapsed = now - _last_read_time
-        if elapsed < min_interval:
-            QtCore.QThread.msleep(int((min_interval - elapsed) * 1000))
-        _last_read_time = time.time()
-
+        self._throttle_polling(10.0)  # wait 10 ms between polls
         pos = DataActuator(data=self.controller.actual_position)
-        pos = self.get_position_with_scaling(pos)
-        return pos
+        return self.get_position_with_scaling(pos)
 
     def user_condition_to_reach_target(self) -> bool:
-        """Adaptive polling to check if the target is reached."""
-        max_wait_ms = 1000  # max time to wait
-        elapsed = 0
-        delay = 10  # start with a small delay in ms
+        """Check once whether the target is reached, with safe polling for all needed values."""
+        
+        # Throttle before position check
+        self._throttle_polling(10)
+        if self.controller.motor.get_position_reached():
 
-        while elapsed < max_wait_ms:
-            if self.controller.motor.get_position_reached():
-                return True
-            QtCore.QThread.msleep(int(delay))
-            elapsed += delay
-            delay = min(delay * 1.5, 100)  # back off up to 100ms max delay
+            # Throttle before left endstop check
+            self._throttle_polling(10)
+            if self.controller.motor.get_axis_parameter(self.controller.motor.AP.LeftEndstop):
+                self.end_stop_hit.emit("left")
 
-        return False  # timeout: assume not reached   
+            # Throttle before right endstop check
+            self._throttle_polling(10)
+            if self.controller.motor.get_axis_parameter(self.controller.motor.AP.RightEndstop):
+                self.right_end_stop_state.emit("right")
+
+            return True
+
+        return False
 
     def close(self):
         """Terminate the communication protocol"""
@@ -98,12 +97,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.port = ''
         self.manager.close(port)
 
-        # Stop any background threads
-        if hasattr(self, 'pos_worker'):
-            self.pos_worker.stop()
-        if hasattr(self, 'pos_thread'):
-            self.pos_thread.quit()
-            self.pos_thread.wait()
         print("Closed connection to device on port {}".format(port))
         self.controller = None
 
@@ -228,8 +221,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         # Set initial timeout very large
         self.settings.child('timeout').setValue(1000)
 
-        # Start threads for encoder position and limit switch monitoring
-        self.start_position_monitoring()
+        # Connect end stop hit signal
+        self._signals = EndStopHitSignal()
+        self._signals.end_stop_hit.connect(self.on_end_stop_hit)
 
         info = f"Actuator on port {self.controller.port} initialized with baudrate {self.manager._baudrate}"
         initialized = True
@@ -279,25 +273,21 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
       self.move_done()
       self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
 
-    def start_position_monitoring(self):
-        self.pos_thread = QtCore.QThread()
-        self.pos_worker = PositionMonitor(self.controller.motor)
+    def on_end_stop_hit(self, endstop: str):
+        self.stop_motion()
+        if endstop == 'left':
+            self.current_value = DataActuator(data=self.settings.child('positioning', 'left_end_stop_pos'))
+        else:
+            self.current_value = DataActuator(data=self.settings.child('positioning', 'right_end_stop_pos'))
 
-        self.pos_worker.moveToThread(self.pos_thread)
-
-        self.pos_thread.started.connect(self.pos_worker.run)
-        self.pos_worker.position_updated.connect(self.on_position_update)
-        self.pos_worker.finished.connect(self.pos_thread.quit)
-        self.pos_worker.finished.connect(self.pos_worker.deleteLater)
-        self.pos_thread.finished.connect(self.pos_thread.deleteLater)
-
-        self.pos_thread.start()
-
-    def on_position_update(self, pos: int):
-        param = self.settings.child('encoder', 'encoder_position')
-        param.setValue(pos)
-        param.sigValueChanged.emit(param, pos)
-
+    def _throttle_polling(self, min_interval_ms: float = 10.0):
+        """Ensures that polls to the hardware are not too frequent."""
+        now = time.perf_counter()
+        elapsed_ms = (now - self._last_poll_time) * 1000
+        remaining = min_interval_ms - elapsed_ms
+        if remaining > 0:
+            QtCore.QThread.msleep(int(remaining))
+        self._last_poll_time = time.perf_counter()            
 
 if __name__ == '__main__':
     main(__file__, init=False)

@@ -190,25 +190,9 @@ class TrinamicController:
     def stop(self) -> None:
         self.motor.stop()
 
-class PositionMonitor(QtCore.QObject):
-    position_updated = QtCore.pyqtSignal(float)
-    finished = QtCore.pyqtSignal()
 
-    def __init__(self, motor_handle, check_interval=500):
+class EndStopHitSignal(QtCore.QObject):
+    end_stop_hit = QtCore.pyqtSignal(str)
+    def __init__(self):
         super().__init__()
-        self._running = True
-        self.motor = motor_handle
-        self.interval = check_interval
-
-    def stop(self):
-        self._running = False
-
-    def run(self):
-        while self._running:
-            try:
-                encoder_pos = self.motor.get_axis_parameter(self.motor.AP.EncoderPosition)
-                self.position_updated.emit(encoder_pos)
-            except Exception:
-                pass
-            QtCore.QThread.msleep(self.interval)
-        self.finished.emit()
+        
