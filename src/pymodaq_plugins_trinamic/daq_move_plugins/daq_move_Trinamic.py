@@ -276,9 +276,20 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     def on_end_stop_hit(self, endstop: str):
         self.stop_motion()
         if endstop == 'left':
+            self.stop_motion()
+            self.emit_status(ThreadCommand('Update_Status', ['Left end stop hit']))
             self.current_value = DataActuator(data=self.settings.child('positioning', 'left_end_stop_pos'))
+            # Throttle before setting actual position
+            self._throttle_polling(10)
+            self.controller.motor.set_axis_parameter(self.controller.motor.AP.ActualPosition, self.settings.child('positioning', 'left_end_stop_pos').value())
+            
         else:
+            self.stop_motion()
+            self.emit_status(ThreadCommand('Update_Status', ['Right end stop hit']))
             self.current_value = DataActuator(data=self.settings.child('positioning', 'right_end_stop_pos'))
+            # Throttle before setting actual position
+            self._throttle_polling(10)
+            self.controller.motor.set_axis_parameter(self.controller.motor.AP.ActualPosition, self.settings.child('positioning', 'left_end_stop_pos').value())
 
     def _throttle_polling(self, min_interval_ms: float = 10.0):
         """Ensures that polls to the hardware are not too frequent."""
