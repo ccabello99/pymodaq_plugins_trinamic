@@ -80,12 +80,12 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             # Throttle before left endstop check
             self._throttle_polling(10)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.LeftEndstop):
-                self.end_stop_hit.emit("left")
+                self._signals.end_stop_hit.emit("left")
 
             # Throttle before right endstop check
             self._throttle_polling(10)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.RightEndstop):
-                self.right_end_stop_state.emit("right")
+                self._signals.end_stop_hit.emit("right")
 
             return True
 
