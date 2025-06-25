@@ -1,7 +1,4 @@
 import time
-import json
-import os
-import platform
 from typing import Union, List, Dict, Tuple
 from pymodaq.control_modules.move_utility_classes import (DAQ_Move_base, comon_parameters_fun,
                                                           main, DataActuatorType, DataActuator)
@@ -10,6 +7,8 @@ from pymodaq_utils.utils import ThreadCommand  # object used to send info back t
 from pymodaq_gui.parameter import Parameter
 from pymodaq_plugins_trinamic.hardware.trinamic import TrinamicManager, TrinamicController, EndStopHitSignal
 from qtpy import QtCore
+
+from pymodaq.control_modules.thread_commands import ThreadStatus
 
 from pytrinamic.modules import TMCM1311
 
@@ -24,6 +23,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     _axis_names: Union[List[str], Dict[str, int]] = ['Axis 1']
     _controller_units: Union[str, List[str]] = 'dimensionless' # this actually corresponds to microsteps for our controllers
     data_actuator_type = DataActuatorType.DataActuator
+    _epsilon: Union[float, List[float]] = 1 # At best, we can tell our Trinamic to move by one microstep
 
     # Initialize communication at 
     manager = TrinamicManager(baudrate=115200)
@@ -31,6 +31,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
     params = [
                 {'title': 'Device Management:', 'name': 'device_manager', 'type': 'group', 'children': [
+                    {'title': 'Refresh Device List:', 'name': 'refresh_devices', 'type': 'bool_push', 'value': False},
                     {'title': 'Connected Devices:', 'name': 'connected_devices', 'type': 'list', 'limits': devices['ports']},
                     {'title': 'Selected Device:', 'name': 'selected_device', 'type': 'str', 'value': '', 'readonly': True},
                     {"title": "Device Serial Number", "name": "device_serial_number", "type": "str", "value": "", 'readonly': True},
@@ -45,20 +46,20 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 ]},
                 {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
                     {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
-                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']},
+                    {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}, # This will determine the max velocity and max acceleration you can use
                     {'title': 'Left End Stop Position:', 'name': 'left_end_stop_pos', 'type': 'float', 'value': 0},
                     {'title': 'Right End Stop Position:', 'name': 'right_end_stop_pos', 'type': 'float', 'value': 100},
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
-                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]}, # Be careful going to the maximum !
-                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 15000000, 'limits': [1, 30000000]}, # Be careful going to the maximum !
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]}, # Be careful going to the maximum ! Respect your motor specs !
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 15000000, 'limits': [1, 30000000]}, # Be careful going to the maximum ! Respect your motor specs !
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
                     {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 75, 'limits': [0, 240]}, # Be careful going to the maximum !
                     {'title': 'Standby Current:', 'name': 'standby_current', 'type': 'int', 'value': 8, 'limits': [0, 240]}, # Be careful going to the maximum !
                     {'title': 'Boost Current:', 'name': 'boost_current', 'type': 'int', 'value': 0, 'limits': [0, 240]}, # Be careful going to the maximum !
                 ]},
-        ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names)
+        ] + comon_parameters_fun(is_multiaxes, axis_names=_axis_names, epsilon=_epsilon)
 
     def ini_attributes(self):
         self.controller: TrinamicController = None
@@ -76,7 +77,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         # Throttle before position check
         self._throttle_polling(10)
         if self.controller.motor.get_position_reached():
-
+            return True
+        # Check endstops while moving
+        else:
             # Throttle before left endstop check
             self._throttle_polling(10)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.LeftEndstop):
@@ -87,15 +90,14 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.RightEndstop):
                 self._signals.end_stop_hit.emit("right")
 
-            return True
-
         return False
 
     def close(self):
         """Terminate the communication protocol"""
-        port = self.controller.port
-        self.controller.port = ''
-        self.manager.close(port)
+        if self.is_master:
+            port = self.controller.port
+            self.controller.port = ''
+            self.manager.close(port)
 
         print("Closed connection to device on port {}".format(port))
         self.controller = None
@@ -112,6 +114,12 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         value = param.value()
         if name == 'closed_loop':
             self.controller.set_closed_loop_mode(value)
+        elif name == 'refresh_devices':
+            param = self.settings['refresh_list']
+            param.setValue(False)
+            param.sigValueChanged(param, False)
+            devices = self.manager.probe_tmcl_ports()
+            self.settings.child('device_manager', 'connected_devices').setLimits(devices['ports'])
         elif name == 'max_velocity':
             self.controller.max_velocity = value
         elif name == 'max_acceleration':
@@ -148,7 +156,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                         param.setValue(False)
                         param.sigValueChanged.emit(param, False)
                         return
-                print("Encoder resolution = {}".format(self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderResolution)))
                 self.settings.child('encoder', 'encoder_resolution').setValue(self.controller.motor.get_axis_parameter(self.controller.motor.AP.EncoderResolution))
                 param = self.settings.child('encoder', 'detect_encoder')
                 param.setValue(False)
@@ -159,7 +166,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 self.controller.motor.set_axis_parameter(self.controller.motor.AP.EncoderResolution, value)
                 self.settings.child('encoder', 'encoder_position').setValue(0)    
         elif name == 'use_scaling':
-            # Update current value in UI
+            # Just use this current value in UI
             self.poll_moving()
         elif name == 'device_user_id':
             self.user_id = value
@@ -190,6 +197,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
         if self.is_master:  # is needed when controller is master
             self.controller = TrinamicController(device_info)
+            initialized = True
+        else:
+            self.controller = controller
+            initialized = True
         
         # Establish connection
         self.manager.connect(self.controller.port)
@@ -210,29 +221,22 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
         self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
 
-        # Good initial scaling for testing (~1 degree for rotation and ~1 mm for linear)
-        #self.settings.child('scaling', 'use_scaling').setValue(True)
-        #self.settings.child('scaling', 'scaling').setValue(1.11111e-5)
-
         # Make sure end stops are enabled by default
         self.controller.motor.set_axis_parameter(self.controller.motor.AP.RightLimitSwitchDiable, 0)
         self._throttle_polling(10)
         self.controller.motor.set_axis_parameter(self.controller.motor.AP.LeftLimitSwitchDisable, 0)
 
-        # Hide some useless settings
+        # This setting never relevant for TMCM1311
         self.settings.child('multiaxes').hide()
-        self.settings.child('epsilon').hide()
 
         # Set initial timeout very large
-        self.settings.child('timeout').setValue(1000)
+        self.settings.child('timeout').setValue(100)
 
         # Connect end stop hit signal
         self._signals = EndStopHitSignal()
         self._signals.end_stop_hit.connect(self.on_end_stop_hit)
 
         info = f"Actuator on port {self.controller.port} initialized with baudrate {self.manager._baudrate}"
-        initialized = True
-        print(info)
         return info, initialized
 
     def move_abs(self, position: DataActuator):
@@ -267,10 +271,10 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
 
     def move_home(self):
         """Call the reference method of the controller"""
-        self.target_value = 0
+        self.target_value = 0 # This
         self.controller.move_to_reference()
         self.emit_status(ThreadCommand('Update_Status', ['Moving to zero position']))
-        self.poll_moving()
+        self.poll_moving() # And this are how we will know when we have made it to our reference position 
 
     def stop_motion(self):
       """Stop the actuator and emits move_done signal"""
@@ -286,7 +290,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             self.current_value = DataActuator(data=self.settings.child('positioning', 'left_end_stop_pos').value())
             # Throttle before setting reference position
             self._throttle_polling(10)
-            self.controller.set_reference_position()
+            self.controller.set_reference_position() # If we hit left end stop, we reset our reference as its position
             self.poll_moving()
         else:
             self.stop_motion()

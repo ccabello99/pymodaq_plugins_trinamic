@@ -62,7 +62,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
     params_client = []  # parameters of a client grabber
     data_actuator_type = DataActuatorType.DataActuator
     params = comon_parameters_fun(axis_names=_axis_names, epsilon=_epsilon) + leco_parameters+ [
-        {'title': "Director Units", 'name': 'director_units', 'type': 'list', 'value': 'microsteps', 'limits': ['mm', 'um', 'nm', 'ps', 'deg', 'rad']},
+        {'title': "Director Units", 'name': 'director_units', 'type': 'list', 'value': 'mm', 'limits': ['mm', 'um', 'nm', 'ps', 'deg', 'rad']},
         {'title': 'LECO Logging', 'name': 'leco_log', 'type': 'group', 'children': [
             {'title': 'Publisher Name', 'name': 'publisher_name', 'type': 'str', 'value': ''},
             {'title': 'Proxy Server Address', 'name': 'proxy_address', 'type': 'str', 'value': 'localhost', 'default': 'localhost'}, # Either IP or hostname of LECO proxy server
@@ -148,7 +148,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         self.director_units = self.settings.param('director_units').value()
 
         # Set initial timeout very large
-        self.settings.child('timeout').setValue(1000)
+        self.settings.child('timeout').setValue(100)
 
         # Setup data publisher for LECO if data publisher name is set (ideally it should match the LECO actor name)
         publisher_name = self.settings.child('leco_log', 'publisher_name').value()
@@ -186,8 +186,10 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
     def move_abs(self, position: float) -> None:
         units = self.director_units
         position = DataActuator(data=position)
+        self._move_done_sig = False
+
         # We will assume that on the actor side, the scaling will always be such that effective units are mm (for linear stages) and deg (for rotation stages)
-        # However, we should be able to provide values remotely in whatever units we want (um, mm, ps (for delays), etc.)
+        # However, we should be able to provide values remotely in whatever units we want (um, rad, ps (for delays), etc.)
         position_metadata = position.value()
         position = self._convert_units_forward(position)
         current_value_metadata = self._convert_units_backward(self.current_value.value())
@@ -212,6 +214,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
     def move_rel(self, position: float) -> None:
         units = self.director_units
         position = DataActuator(data=position)
+        self._move_done_sig = False
 
         # We will assume that on the actor side, the scaling will always be such that effective units are mm (for linear stages) and deg (for rotation stages)
         # However, we should be able to provide values remotely in whatever units we want (um, mm, ps (for delays), etc.)
@@ -240,6 +243,7 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
     def move_home(self):
         units = self.director_units
         self.target_value = 0
+        self._move_done_sig = False
         current_value_metadata = self._convert_units_backward(self.current_value.value())
         self.current_value = self._convert_units_forward(self.current_value)
         # Tell proxy server we have started a movement
@@ -303,9 +307,10 @@ class DAQ_Move_TrinamicLECO(LECODirector, DAQ_Move_base):
         return value
             
     def close(self):
-        if self.listener:
-            self.listener.close()
-        self.listener = None            
+        if self.is_master:
+            if self.listener:
+                self.listener.close()
+            self.listener = None            
 
     # Methods accessible via remote calls
     def _set_position_value(
