@@ -47,12 +47,13 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 {'title': 'Positioning:', 'name': 'positioning', 'type': 'group', 'children': [
                     {'title': 'Set Reference Position:', 'name': 'set_reference_position', 'type': 'bool_push', 'value': False},
                     {'title': 'Microstep Resolution', 'name': 'microstep_resolution', 'type': 'list', 'value': '256', 'default': '256', 'limits': ['Full', 'Half', '4', '8', '16', '32', '64', '128', '256']}, # This will determine the max velocity and max acceleration you can use
+                    {'title': 'Handle Endstops ?', 'name': 'endstop_handling', 'type': 'led_push', 'value': False},
                     {'title': 'Left End Stop Position:', 'name': 'left_end_stop_pos', 'type': 'float', 'value': 0},
                     {'title': 'Right End Stop Position:', 'name': 'right_end_stop_pos', 'type': 'float', 'value': 100},
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
-                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 100000, 'limits': [1, 250000]}, # Be careful going to the maximum ! Respect your motor specs !
-                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 15000000, 'limits': [1, 30000000]}, # Be careful going to the maximum ! Respect your motor specs !
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 128000, 'limits': [1, 250000]}, # Be careful going to the maximum ! Respect your motor specs !
+                    {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 5120000, 'limits': [1, 30000000]}, # Be careful going to the maximum ! Respect your motor specs !
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
                     {'title': 'Max Current:', 'name': 'max_current', 'type': 'int', 'value': 75, 'limits': [0, 240]}, # Be careful going to the maximum !
@@ -83,12 +84,14 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             # Throttle before left endstop check
             self._throttle_polling(10)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.LeftEndstop):
-                self._signals.end_stop_hit.emit("left")
+                if self._signals is not None:
+                    self._signals.end_stop_hit.emit("left")
 
             # Throttle before right endstop check
             self._throttle_polling(10)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.RightEndstop):
-                self._signals.end_stop_hit.emit("right")
+                if self._signals is not None:
+                    self._signals.end_stop_hit.emit("right")
 
         return False
 
@@ -170,6 +173,25 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
             self.poll_moving()
         elif name == 'device_user_id':
             self.user_id = value
+        elif name == 'endstop_handling':
+            if value:
+                # Enable endstop detection
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.RightLimitSwitchDiable, 0)
+                self._throttle_polling(10)
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.LeftLimitSwitchDisable, 0)
+
+                # Connect end stop hit signal
+                self._signals = EndStopHitSignal()
+                self._signals.end_stop_hit.connect(self.on_end_stop_hit)
+            else:
+                # Disable endstop detection
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.RightLimitSwitchDiable, 1)
+                self._throttle_polling(10)
+                self.controller.motor.set_axis_parameter(self.controller.motor.AP.LeftLimitSwitchDisable, 1)
+
+                # Disconnect end stop hit signal
+                self._signals.end_stop_hit.disconnect(self.on_end_stop_hit)
+                self._signals = None
         
 
     def ini_stage(self, controller=None):
@@ -221,20 +243,11 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller.max_velocity = self.settings.child('motion', 'max_velocity').value()
         self.controller.max_acceleration = self.settings.child('motion', 'max_acceleration').value()
 
-        # Make sure end stops are enabled by default
-        self.controller.motor.set_axis_parameter(self.controller.motor.AP.RightLimitSwitchDiable, 0)
-        self._throttle_polling(10)
-        self.controller.motor.set_axis_parameter(self.controller.motor.AP.LeftLimitSwitchDisable, 0)
-
         # This setting never relevant for TMCM1311
         self.settings.child('multiaxes').hide()
 
         # Set initial timeout very large
         self.settings.child('timeout').setValue(100)
-
-        # Connect end stop hit signal
-        self._signals = EndStopHitSignal()
-        self._signals.end_stop_hit.connect(self.on_end_stop_hit)
 
         info = f"Actuator on port {self.controller.port} initialized with baudrate {self.manager._baudrate}"
         return info, initialized
