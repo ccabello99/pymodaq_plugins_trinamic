@@ -23,9 +23,8 @@ class TrinamicManager:
             try:
                 conn = UsbTmclInterface(port.device, datarate=9600)
                 if platform.system() == 'Windows':
-                    if port.serial_number == 'TMCSTEP':
-                        self.devices['ports'].append(port.device)
-                        self.devices['serial_numbers'].append(port.serial_number)
+                    self.devices['ports'].append(port.device)
+                    self.devices['serial_numbers'].append(port.serial_number)
                 else:
                     if port.manufacturer == 'Trinamic Motion Control':
                         self.devices['ports'].append(port.device)
