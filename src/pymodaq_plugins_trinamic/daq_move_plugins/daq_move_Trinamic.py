@@ -52,7 +52,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                     {'title': 'Right End Stop Position:', 'name': 'right_end_stop_pos', 'type': 'float', 'value': 100},
                 ]},
                 {'title': 'Motion Control:', 'name': 'motion', 'type': 'group', 'children': [
-                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 128000, 'limits': [1, 250000]}, # Be careful going to the maximum ! Respect your motor specs !
+                    {'title': 'Max Velocity:', 'name': 'max_velocity', 'type': 'int', 'value': 128000, 'limits': [1, 512000]}, # Be careful going to the maximum ! Respect your motor specs !
                     {'title': 'Max Acceleration:', 'name': 'max_acceleration', 'type': 'int', 'value': 5120000, 'limits': [1, 30000000]}, # Be careful going to the maximum ! Respect your motor specs !
                 ]},
                 {'title': 'Drive Setting:', 'name': 'drive', 'type': 'group', 'children': [
