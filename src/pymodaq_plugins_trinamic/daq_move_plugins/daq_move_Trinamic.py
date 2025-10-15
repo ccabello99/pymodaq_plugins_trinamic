@@ -66,10 +66,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller: TrinamicController = None
         self.user_id = None
         self._last_poll_time = 0.0  # Used to throttle polling frequency
-        self._signals = None
 
     def get_actuator_value(self):
-        self._throttle_polling(10.0)  # wait 10 ms between polls
+        self._throttle_polling(20.0)  # wait 20 ms between polls
         pos = DataActuator(data=self.controller.actual_position)
         return self.get_position_with_scaling(pos)
 
@@ -77,19 +76,19 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         """Check once whether the target is reached, with safe polling for all needed values."""
         
         # Throttle before position check
-        self._throttle_polling(10)
+        self._throttle_polling(20)
         if self.controller.motor.get_position_reached():
             return True
         # Check endstops while moving
         else:
             # Throttle before left endstop check
-            self._throttle_polling(10)
+            self._throttle_polling(20)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.LeftEndstop):
                 if self._signals is not None:
                     self._signals.end_stop_hit.emit("left")
 
             # Throttle before right endstop check
-            self._throttle_polling(10)
+            self._throttle_polling(20)
             if self.controller.motor.get_axis_parameter(self.controller.motor.AP.RightEndstop):
                 if self._signals is not None:
                     self._signals.end_stop_hit.emit("right")
@@ -136,7 +135,6 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
                 param = self.settings.child('positioning', 'set_reference_position')
                 param.setValue(False)
                 param.sigValueChanged.emit(param, False)
-                self.poll_moving()
         elif name =='max_current':
             self.controller.max_current = value
         elif name =='standby_current':
@@ -299,17 +297,9 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
     def on_end_stop_hit(self, endstop: str):
         self.stop_motion()
         if endstop == 'left':
-            self.stop_motion()
             self.emit_status(ThreadCommand('Update_Status', ['Left end stop hit']))
-            self.current_value = DataActuator(data=self.settings.child('positioning', 'left_end_stop_pos').value())
-            # Throttle before setting reference position
-            self._throttle_polling(10)
-            self.controller.set_reference_position() # If we hit left end stop, we reset our reference as its position
-            self.poll_moving()
         else:
-            self.stop_motion()
             self.emit_status(ThreadCommand('Update_Status', ['Right end stop hit']))
-            self.current_value = DataActuator(data=self.settings.child('positioning', 'right_end_stop_pos').value())
 
 
     def _throttle_polling(self, min_interval_ms: float = 10.0):
