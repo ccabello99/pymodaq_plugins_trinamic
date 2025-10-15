@@ -66,6 +66,7 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.controller: TrinamicController = None
         self.user_id = None
         self._last_poll_time = 0.0  # Used to throttle polling frequency
+        self._signals = None
 
     def get_actuator_value(self):
         self._throttle_polling(20.0)  # wait 20 ms between polls
