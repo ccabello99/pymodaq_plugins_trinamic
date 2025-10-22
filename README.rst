@@ -15,7 +15,7 @@ pymodaq_plugins_trinamic
     :target: https://github.com/ccabello99/pymodaq_plugins_trinamic/actions/workflows/Test.yml
 
 
-PyMoDAQ plugin for interfacing with Trinamic stepper motor control units
+PyMoDAQ plugin for interfacing with Trinamic stepper motor control units.
 
 
 Authors
@@ -55,4 +55,5 @@ Installation instructions
 =========================
 * Tested on PyMoDAQ version 5.0.6
 * Tested on Windows 11 and Ubuntu 24.04
+* Currently this is only compatible with the TMCM-1311 Trinamic stepper motor controller, but it can be extended to other controllers fairly straightforwardly in a local installation.
 
