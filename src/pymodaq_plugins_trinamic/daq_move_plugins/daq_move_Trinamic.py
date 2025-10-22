@@ -15,7 +15,7 @@ from pytrinamic.modules import TMCM1311
 class DAQ_Move_Trinamic(DAQ_Move_base):
     """
         * This has been tested with the TMCM-1311 Trinamic stepper motor controller
-        * Tested on PyMoDAQ 5.0.6
+        * Tested on PyMoDAQ >5.0.6
         * Tested on Python 3.11
         * No additional drivers necessary
     """
