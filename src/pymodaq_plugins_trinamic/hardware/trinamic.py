@@ -21,7 +21,6 @@ class TrinamicManager:
 
         for port in ports:
             try:
-                conn = UsbTmclInterface(port.device, datarate=9600)
                 if platform.system() == 'Windows':
                     self.devices['ports'].append(port.device)
                     self.devices['serial_numbers'].append(port.serial_number)
@@ -29,7 +28,6 @@ class TrinamicManager:
                     if port.manufacturer == 'Trinamic Motion Control':
                         self.devices['ports'].append(port.device)
                         self.devices['serial_numbers'].append(port.serial_number)
-                conn.close()
             except Exception as e:
                 pass
         return self.devices
