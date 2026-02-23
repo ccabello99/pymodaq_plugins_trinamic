@@ -1,6 +1,7 @@
 from qtpy import QtWidgets, QtCore
 from pathlib import Path
 from typing import Optional
+import json
 
 from pymodaq_gui import utils as gutils
 from pymodaq_utils.config import Config
@@ -18,6 +19,12 @@ config_pymodaq = PyMoConfig()
 
 EXTENSION_NAME = 'Trinamic Presets'
 CLASS_NAME = 'TrinamicPresets'
+
+class TrinamicPresetsConfig(Config):
+    config_name = 'trinamic_presets'
+    config_template_path = None
+
+trinamic_config = TrinamicPresetsConfig()
 
 
 class TrinamicPresets(CustomExt):
@@ -201,16 +208,92 @@ class TrinamicPresets(CustomExt):
                        "Refresh connection to actuator")
         self.add_action('update_position', 'Update Position', 'run2',
                        "Update current position display")
+        self.add_action('save_presets', 'Save Presets', 'save2',
+                        "Save presets to JSON")
+        self.add_action('load_presets', 'Load Presets', 'load2',
+                        "Load presets from JSON")        
 
     def connect_things(self):
         """Connect actions and signals to methods"""
         self.connect_action('quit', self.quit_fun)
         self.connect_action('refresh_actuator', self.refresh_actuator)
         self.connect_action('update_position', self.update_current_position)
+        self.connect_action('save_presets', self.save_presets_to_json)
+        self.connect_action('load_presets', self.load_presets_from_json)        
 
-    def setup_menu(self, menubar: QtWidgets.QMenuBar = None):
-        """Setup the menu bar (optional)"""
-        pass
+    def _collect_presets(self) -> dict:
+        presets = {}
+        for i in range(1, 5):
+            path = ('presets', f'preset{i}')
+            presets[f'preset{i}'] = {
+                'enabled': self.settings[path + ('enabled',)],
+                'label': self.settings[path + ('label',)],
+                'position': self.settings[path + ('position',)],
+            }
+        return {'presets': presets}
+    
+    def _apply_presets(self, data: dict):
+        presets = data.get('presets', {})
+        for i in range(1, 5):
+            key = f'preset{i}'
+            if key not in presets:
+                continue
+
+            preset = presets[key]
+            path = ('presets', key)
+
+            self.settings.child(*path, 'enabled').setValue(
+                preset.get('enabled', True))
+            self.settings.child(*path, 'label').setValue(
+                preset.get('label', f'Preset {i}'))
+            self.settings.child(*path, 'position').setValue(
+                preset.get('position', 0.0))
+
+        self.update_button_states()
+
+    def save_presets_to_json(self):
+        start_dir = self.get_last_directory()
+
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self.mainwindow,
+            "Save Preset File",
+            start_dir,
+            "JSON Files (*.json);;All Files (*)"
+        )
+
+        if not filename:
+            return
+
+        if not filename.lower().endswith('.json'):
+            filename += '.json'
+
+        self.set_last_directory(filename)
+
+        with open(filename, 'w') as f:
+            json.dump(self._collect_presets(), f, indent=4)
+
+        self.log_message(f"Presets saved to:\n{filename}")
+
+    def load_presets_from_json(self):
+        start_dir = self.get_last_directory()
+
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self.mainwindow,
+            "Load Preset File",
+            start_dir,
+            "JSON Files (*.json);;All Files (*)"
+        )
+
+        if not filename:
+            return
+
+        self.set_last_directory(filename)
+
+        with open(filename, 'r') as f:
+            data = json.load(f)
+
+        self._apply_presets(data)
+        self.log_message(f"Presets loaded from:\n{filename}")
 
     def value_changed(self, param):
         """Handle parameter value changes"""
@@ -368,10 +451,25 @@ class TrinamicPresets(CustomExt):
         else:
             logger.info(message)
 
+    def get_last_directory(self, default=None):
+        try:
+            last_dir = trinamic_config[('last_directory',)]
+            if last_dir and Path(last_dir).exists():
+                return last_dir
+        except Exception:
+            pass
+
+        return default or str(Path.home())
+
+    def set_last_directory(self, filepath: str):
+        directory = str(Path(filepath).parent)
+
+        trinamic_config[('last_directory',)] = directory
+        trinamic_config.save()
+
     def quit_fun(self):
         """Close the extension"""
         self.mainwindow.close()
-
 
 def main():
     from pymodaq_gui.utils.utils import mkQApp
