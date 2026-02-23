@@ -17,21 +17,19 @@ class TrinamicManager:
 
     def probe_tmcl_ports(self):
         self.devices = {'ports':[], 'serial_numbers':[]}
-        ports = list_ports.comports()
 
-        for port in ports:
+        for port in list_ports.comports():
             try:
-                conn = UsbTmclInterface(port.device, datarate=9600)
                 if platform.system() == 'Windows':
-                    self.devices['ports'].append(port.device)
-                    self.devices['serial_numbers'].append(port.serial_number)
+                    if port.serial_number is None:
+                        continue
                 else:
-                    if port.manufacturer == 'Trinamic Motion Control':
-                        self.devices['ports'].append(port.device)
-                        self.devices['serial_numbers'].append(port.serial_number)
-                conn.close()
-            except Exception as e:
-                pass
+                    if not port.manufacturer == 'Trinamic Motion Control':
+                        continue
+                self.devices['ports'].append(port.device)
+                self.devices['serial_numbers'].append(port.serial_number)                    
+            except Exception:
+                continue
         return self.devices
 
     def connect(self, port):

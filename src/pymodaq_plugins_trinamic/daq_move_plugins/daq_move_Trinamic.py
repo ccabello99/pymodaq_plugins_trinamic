@@ -290,10 +290,14 @@ class DAQ_Move_Trinamic(DAQ_Move_base):
         self.poll_moving() # And this are how we will know when we have made it to our reference position 
 
     def stop_motion(self):
-      """Stop the actuator and emits move_done signal"""
-      self.controller.stop()
-      self.move_done()
-      self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
+        """Stop the actuator and emits move_done signal"""
+        self.controller.stop()
+        time.sleep(0.05)  # Brief delay to ensure motor has stopped
+        actual_pos = self.get_actuator_value()
+        self.current_position = actual_pos
+        self.target_value = actual_pos  # Reset target to current position
+        self.move_done()
+        self.emit_status(ThreadCommand('Update_Status', ['Stop motion']))
 
     def on_end_stop_hit(self, endstop: str):
         self.stop_motion()
